@@ -1,0 +1,15 @@
+{
+  "product_info": {
+    "vendor": "Linux",
+    "product_name": "OpenvSwitch",
+    "version": "2.17.0",
+    "os": "Linux"
+  },
+  "host_info": {
+    "remote_host": "192.168.1.10",
+    "remote_user": "admin"
+  },
+  "vlan_id": 200,
+  "if_name": "eth0",
+  "extra_parameter": "{}"
+}

@@ -1,0 +1,40 @@
+replicaCount: 1
+image:
+  repository: localhost/dci_physical_infrastructure/log
+  tag: 0.3.7
+  pullPolicy: IfNotPresent
+config:
+  logging:
+    ipmi:
+      logFile: server
+      logPath: /var/log/dci_physical_infrastructure/log
+      maxSize: 2048
+      maxBackups: 10
+      maxAge: 30
+    cdi:
+      logFile: cdi
+      logPath: /var/log/cdi_hhchk
+      maxSize: 2048
+      maxBackups: 10
+      maxAge: 30
+    cdisoft:
+      logFile: cdisoft
+      logPath:  /var/log/dci_physical_infrastructure/log
+      maxSize: 2048
+      maxBackups: 10
+      maxAge: 30
+    maasserver:
+      logFile: maas
+      logPath:  /var/log/dci_physical_infrastructure/log
+      maxSize: 2048
+      maxBackups: 10
+      maxAge: 30
+  logLevel: "2"
+  serverPort: 50054
+  interval: 10
+  sshPrivateKeyPath: "/etc/ssh-keys/id_ed25519"
+ssh:
+  secretName: physical-infrastructure-ssh-keys
+service:
+  type: ClusterIP
+  port: 83

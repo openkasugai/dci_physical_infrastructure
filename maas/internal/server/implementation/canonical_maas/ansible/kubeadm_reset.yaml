@@ -1,0 +1,74 @@
+- hosts: all
+  become: yes
+  gather_facts: yes
+
+  tasks:
+    - name: Check if kubeadm is installed
+      command: which kubeadm
+      register: kubeadm_check
+      failed_when: false
+      changed_when: false
+
+    - name: Fail if kubeadm is not installed
+      fail:
+        msg: "kubeadm is not installed on this node"
+      when: kubeadm_check.rc != 0
+
+    - name: Check if node is part of a cluster
+      stat:
+        path: /etc/kubernetes/kubelet.conf
+      register: kubelet_conf
+
+    - name: Execute kubeadm reset
+      command: kubeadm reset --force
+      register: reset_result
+      when: kubelet_conf.stat.exists
+
+    - name: Remove .kube directory (root)
+      file:
+        path: /root/.kube
+        state: absent
+      when: kubelet_conf.stat.exists
+
+    - name: Remove .kube directory (user)
+      file:
+        path: "/home/{{ ansible_user }}/.kube"
+        state: absent
+      when: kubelet_conf.stat.exists and ansible_user is defined and ansible_user != "root"
+
+    - name: Clean up CNI configuration
+      file:
+        path: /etc/cni/net.d
+        state: absent
+      when: kubelet_conf.stat.exists
+
+    - name: Recreate CNI directory
+      file:
+        path: /etc/cni/net.d
+        state: directory
+        mode: '0755'
+      when: kubelet_conf.stat.exists
+
+    - name: Remove iptables rules
+      shell: |
+        iptables -F && iptables -t nat -F && iptables -t mangle -F && iptables -X
+      failed_when: false
+      when: kubelet_conf.stat.exists
+
+    - name: Reset iptables to default policy
+      shell: |
+        iptables -P INPUT ACCEPT
+        iptables -P FORWARD ACCEPT
+        iptables -P OUTPUT ACCEPT
+      failed_when: false
+      when: kubelet_conf.stat.exists
+
+    - name: Display reset result
+      debug:
+        var: reset_result.stdout_lines
+      when: kubelet_conf.stat.exists
+
+    - name: Node not in cluster message
+      debug:
+        msg: "Node is not part of a Kubernetes cluster, skipping reset"
+      when: not kubelet_conf.stat.exists

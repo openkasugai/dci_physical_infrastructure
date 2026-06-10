@@ -1,0 +1,9 @@
+- hosts: all
+  become: no
+
+  tasks:
+    - name: spec list
+      import_role:
+        name: role_login_cdi
+      vars:
+        execute_cdi_command: "spec list"

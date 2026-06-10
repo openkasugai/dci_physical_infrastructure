@@ -1,0 +1,20 @@
+{
+  "product_info": {
+    "vendor": "canonical",
+    "product_name": "MAAS",
+    "version": "3.6.2",
+    "os": "Ubuntu"
+  },
+  "maas_info": {
+    "access_url": "http://172.31.16.200:5240/MAAS/api/2.0/",
+    "api_key": "sRhC972UsMXH9VGdE5:72AAmD3vJrNDvRBRrT:FSgAxnQZVRYT6Sy8LrAu7ARv9pEMS64F"
+  },
+  "system_id": "system-001",
+  "vm_flag": true,
+  "os": {
+    "distribution": "rhel",
+    "version": "rhel9"
+  },
+  "user_data": "I2Nsb3VkLWNvbmZpZwplYXJseV9jb21tYW5kczogCiAgLSBzdWRvIHN1ZG8gc3Vic2NyaXB0aW9uLW1hbmFnZXIgcmVnaXN0ZXIgLS1hY3RpdmF0aW9ua2V5PSdjZGktZmonIC0tb3JnPTE4ODA4MTAyCnBhc3N3b3JkOiBjbG91ZC11c2VyCmNocGFzc3dkOiB7ZXhwaXJlOiBGYWxzZX0Kc3NoX3B3YXV0aDogeWVzCnRpbWV6b25lOiAiQXNpYS9Ub2t5byI=",
+  "extra_parameter": "{}"
+}

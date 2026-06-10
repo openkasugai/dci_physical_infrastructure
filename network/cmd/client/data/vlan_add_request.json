@@ -1,0 +1,16 @@
+{
+  "product_info": {
+    "vendor": "SONiC",
+    "product_name": "SONiC",
+    "version": "4.0.0",
+    "os": "Linux"
+  },
+  "switch_info": {
+    "remote_host": "192.168.1.1",
+    "remote_user": "admin"
+  },
+  "interface_name": "Ethernet1",
+  "vlan_type": "Trunk",
+  "vlan_id": 100,
+  "extra_parameter": "{}"
+}

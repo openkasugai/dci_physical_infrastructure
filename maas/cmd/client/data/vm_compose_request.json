@@ -1,0 +1,34 @@
+{
+  "product_info": {
+    "vendor": "canonical",
+    "product_name": "MAAS",
+    "version": "3.6.2",
+    "os": "Ubuntu"
+  },
+  "maas_info": {
+    "access_url": "http://172.31.16.200:5240/MAAS/api/2.0/",
+    "api_key": "sRhC972UsMXH9VGdE5:72AAmD3vJrNDvRBRrT:FSgAxnQZVRYT6Sy8LrAu7ARv9pEMS64F"
+  },
+  "system_id": "host-001",
+  "host_name": "vm-001",
+  "cpu_core": 2,
+  "memory": 4096,
+  "disk_size": 20,
+  "network_information": [
+    {
+      "if_name": "eth0",
+      "bridge_name": "br0",
+      "cidr": "192.168.2.0/24",
+      "address_start": "192.168.2.10",
+      "address_end": "192.168.2.100"
+    },
+    {
+      "if_name": "eth1",
+      "bridge_name": "br1",
+      "cidr": "10.0.0.0/24",
+      "address_start": "10.0.0.10",
+      "address_end": "10.0.0.100"
+    }
+  ],
+  "extra_parameter": "{}"
+}

@@ -1,0 +1,11 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: cdi-client-cert
+  namespace: default
+spec:
+  secretName: cdi-client-tls
+  issuerRef:
+    name: shared-root-ca
+    kind: ClusterIssuer
+  commonName: cdi-client

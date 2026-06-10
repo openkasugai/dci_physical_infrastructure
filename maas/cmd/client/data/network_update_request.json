@@ -1,0 +1,22 @@
+{
+  "product_info": {
+    "vendor": "canonical",
+    "product_name": "MAAS",
+    "version": "3.6.2",
+    "os": "Ubuntu"
+  },
+  "maas_info": {
+    "access_url": "http://172.31.16.200:5240/MAAS/api/2.0/",
+    "api_key": "sRhC972UsMXH9VGdE5:72AAmD3vJrNDvRBRrT:FSgAxnQZVRYT6Sy8LrAu7ARv9pEMS64F"
+  },
+  "system_id": "system-001",
+  "network_information": [
+    {
+      "mac_address": "00:11:22:33:44:55",
+      "cidr": "192.168.1.0/24",
+      "address_start": "192.168.1.10",
+      "address_end": "192.168.1.100"
+    }
+  ],
+  "extra_parameter": "{}"
+}

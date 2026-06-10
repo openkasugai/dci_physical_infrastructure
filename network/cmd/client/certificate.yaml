@@ -1,0 +1,11 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: network-client-cert
+  namespace: default
+spec:
+  secretName: network-client-tls
+  issuerRef:
+    name: shared-root-ca
+    kind: ClusterIssuer
+  commonName: network-client

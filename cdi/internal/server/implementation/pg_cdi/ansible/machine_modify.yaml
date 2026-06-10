@@ -1,0 +1,9 @@
+- hosts: all
+  become: no
+
+  tasks:
+    - name: machine modify
+      import_role:
+        name: role_login_cdi
+      vars:
+        execute_cdi_command: "machine modify -m {{ machine_name }} -g {{ group_name }} -M {{ operation }} -r {{ resource_enum }}"

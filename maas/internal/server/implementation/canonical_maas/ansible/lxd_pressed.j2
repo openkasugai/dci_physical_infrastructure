@@ -1,0 +1,25 @@
+config:
+  core.https_address: '[::]:{{ lxd_port }}'
+  images.auto_update_interval: "0"
+  maas.api.key: {{ maas_api_key }}
+  maas.api.url: {{ maas_url }}
+  maas.machine: {{ host_name }}
+networks: []
+storage_pools:
+- config:
+    size: {{ host_disk_size }}GiB
+  description: ""
+  name: default
+  driver: lvm
+storage_volumes: []
+profiles:
+- config: {}
+  description: ""
+  devices:
+    root:
+      path: /
+      pool: default
+      type: disk
+  name: default
+projects: []
+cluster: null

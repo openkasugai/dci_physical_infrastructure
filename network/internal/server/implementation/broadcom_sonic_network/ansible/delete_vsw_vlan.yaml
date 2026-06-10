@@ -1,0 +1,59 @@
+- hosts: all
+  gather_facts: false
+  become: true
+
+  vars:
+    network_manager_dir: /etc/sysconfig/network-scripts
+
+  tasks:
+    - name: check if (vlan interface) exists
+      command: ip addr show {{ if_name }}.{{ vid }}
+      register: vlan_check_result
+      ignore_errors: true
+      when: vid != 'none'
+
+    - name: set vlan existence flag
+      set_fact:
+        vid_exists: "{{ vlan_check_result.rc == 0 if vid != 'none' else false }}"
+
+    - name: check if (bridge interface) exists
+      command: ip addr show br-{{ if_name }}.{{ vid }}
+      register: bridge_check_result
+      ignore_errors: true
+      when: vid != 'none'
+
+    - name: set bridge existence flag
+      set_fact:
+        bridge_exists: "{{ bridge_check_result.rc == 0 if vid != 'none' else false }}"
+
+    - name: vlan and bridge not exist check
+      fail:
+        msg: "{{ if_name }}.{{ vid }} AND br-{{ if_name }}.{{ vid }} are not exist"
+      when: 
+        - vid != 'none'
+        - not vid_exists
+        - not bridge_exists
+
+    - name: delete vlan interface 
+      file:
+        path: "{{ network_manager_dir }}/ifcfg-{{ if_name }}.{{ vid }}"
+        state: absent
+      when: vid != 'none' and vid_exists
+
+    - name: delete bridge interface 
+      file:
+        path: "{{ network_manager_dir }}/ifcfg-br-{{ if_name }}.{{ vid }}"
+        state: absent
+      when: vid != 'none' and bridge_exists
+
+    - name: restart_network
+      command: nmcli connection reload
+      when: vid != 'none' and (vid_exists or bridge_exists)
+
+    - name: show result
+      shell: ip a
+      register: __result
+
+    - name: result output
+      debug:
+        msg: "{{ __result.stdout_lines }}"

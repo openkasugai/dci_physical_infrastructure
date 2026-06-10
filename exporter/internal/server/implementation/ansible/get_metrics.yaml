@@ -1,0 +1,41 @@
+- hosts: all
+  gather_facts: no
+
+  tasks:
+    - name: exec vmstat
+      shell: vmstat 1 2 | awk 'NR==4 {printf "us=%.1f sy=%.1f wa=%.1f st=%.1f", $13, $14, $16, $17}'
+      register: vmstat_output
+
+    - name: extract CPU stat
+      set_fact:
+        cpu_us: "{{ vmstat_output.stdout.split(' ')[0].split('=')[1] | float }}"
+        cpu_sy: "{{ vmstat_output.stdout.split(' ')[1].split('=')[1] | float }}"
+        cpu_wa: "{{ vmstat_output.stdout.split(' ')[2].split('=')[1] | float }}"
+        cpu_st: "{{ vmstat_output.stdout.split(' ')[3].split('=')[1] | float }}"
+
+    - name: CPU usage
+      set_fact:
+        cpu_usage: "{{ cpu_us | float + cpu_sy | float + cpu_wa | float + cpu_st | float }}"
+
+    - name: exec free
+      shell: free -m | awk 'NR==2 {printf "total=%d used=%d free=%d shared=%d buff/cache=%d available=%d", $2, $3, $4, $5, $6, $7}'
+      register: free_output
+
+    - name: extract memory stat
+      set_fact:
+        mem_total: "{{ free_output.stdout.split(' ')[0].split('=')[1] | int }}"
+        mem_used: "{{ free_output.stdout.split(' ')[1].split('=')[1] | int }}"
+        mem_free: "{{ free_output.stdout.split(' ')[2].split('=')[1] | int }}"
+        mem_shared: "{{ free_output.stdout.split(' ')[3].split('=')[1] | int }}"
+        mem_buff_cache: "{{ free_output.stdout.split(' ')[4].split('=')[1] | int }}"
+        mem_available: "{{ free_output.stdout.split(' ')[5].split('=')[1] | int }}"
+
+    - name: memory usage
+      set_fact:
+        mem_usage: "{{ (mem_used | float / mem_total | float) * 100 }}"
+
+    - name: result output
+      debug:
+        msg:
+          cpu_usage: "{{ cpu_usage }}"
+          mem_usage: "{{ mem_usage }}"

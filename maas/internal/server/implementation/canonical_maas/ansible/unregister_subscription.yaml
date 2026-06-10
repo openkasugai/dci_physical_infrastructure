@@ -1,0 +1,27 @@
+- hosts: all
+  become: yes
+  gather_facts: no
+
+  tasks:
+    # Check current subscription status for idempotency
+    - name: check current subscription status
+      shell: subscription-manager list
+      register: subscription_status
+      failed_when: false
+      changed_when: false
+
+    # Parse status to determine if already unregistered
+    - name: determine if subscription is already unregistered
+      set_fact:
+        already_unregistered: "{{ 'Status:' in subscription_status.stdout and 'Unknown' in subscription_status.stdout.split('Status:')[1].split('\n')[0] | trim }}"
+
+    # Log the idempotency check result
+    - name: log subscription status check result
+      debug:
+        msg: "Subscription already unregistered: {{ already_unregistered }}"
+
+    # Unregister subscription only if currently registered
+    - name: unregister subscription
+      shell: subscription-manager unregister
+      when: not already_unregistered
+      register: unregister_result

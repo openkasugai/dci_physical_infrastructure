@@ -1,0 +1,40 @@
+- hosts: all
+  become: yes
+  gather_facts: no
+
+  tasks:
+    - name: Check if kubeadm is installed
+      command: which kubeadm
+      register: kubeadm_check
+      failed_when: false
+      changed_when: false
+
+    - name: Fail if kubeadm is not installed
+      fail:
+        msg: "kubeadm is not installed on this node"
+      when: kubeadm_check.rc != 0
+
+    - name: Validate join command
+      fail:
+        msg: "join_command parameter is not provided"
+      when: join_command is not defined or join_command == ""
+
+    - name: Check if node is already part of a cluster
+      stat:
+        path: /etc/kubernetes/kubelet.conf
+      register: kubelet_conf
+
+    - name: Execute kubeadm join
+      shell: "{{ join_command }}"
+      register: join_result
+      when: not kubelet_conf.stat.exists
+
+    - name: Display join result
+      debug:
+        var: join_result.stdout_lines
+      when: join_result is defined and join_result.stdout_lines is defined
+
+    - name: Node already joined message
+      debug:
+        msg: "Node is already part of a Kubernetes cluster"
+      when: kubelet_conf.stat.exists

@@ -1,0 +1,23 @@
+- hosts: all
+  become: yes
+  gather_facts: no
+
+  tasks:
+    - name: delete vlan member
+      ansible.builtin.shell: |
+        config vlan member del {{ vid }} {{ interface }}
+      register: delete_vlan_member_result
+
+    - name: save config
+      ansible.builtin.shell: |
+        config save -y
+      when: delete_vlan_member_result is changed
+
+    - name: show vlan
+      ansible.builtin.shell: |
+        show vlan config | grep Vlan{{ vid }}
+      register: __result
+
+    - name: result output
+      debug:
+        msg: "{{ __result.stdout_lines }}"

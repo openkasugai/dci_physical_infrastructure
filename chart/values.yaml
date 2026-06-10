@@ -1,0 +1,144 @@
+physical-infrastructure-cdi:
+  replicaCount: 1
+  image:
+    repository: localhost/dci_physical_infrastructure/cdi
+    tag: 0.3.7
+    pullPolicy: IfNotPresent
+  config:
+    logLevel: "2"
+    serverPort: 50051
+    sshPrivateKeyPath: "/etc/ssh-keys/id_ed25519"
+  ssh:
+    secretName: physical-infrastructure-ssh-keys
+  service:
+    type: ClusterIP
+    port: 80
+  tls:
+    enabled: true
+    secretName: cdi-server-tls
+    certPath: /etc/cdi/tls
+    issuerName: shared-root-ca
+    issuerKind: ClusterIssuer
+    commonName: physical-infrastructure-cdi-service
+    dnsNames:
+      - physical-infrastructure-cdi-service.default.svc.cluster.local
+
+physical-infrastructure-maas:
+  replicaCount: 1
+  image:
+    repository: localhost/dci_physical_infrastructure/maas
+    tag: 0.3.7
+    pullPolicy: IfNotPresent
+  config:
+    logLevel: "2"
+    serverPort: 50053
+    sshPrivateKeyPath: "/etc/ssh-keys/id_ed25519"
+    vmHostDisk: 80
+    lxdListenPort: 8443
+  ssh:
+    secretName: physical-infrastructure-ssh-keys
+  service:
+    type: ClusterIP
+    port: 82
+  tls:
+    enabled: true
+    secretName: maas-server-tls
+    certPath: /etc/maas/tls
+    issuerName: shared-root-ca
+    issuerKind: ClusterIssuer
+    commonName: physical-infrastructure-maas-service
+    dnsNames:
+      - physical-infrastructure-maas-service.default.svc.cluster.local
+
+physical-infrastructure-network:
+  replicaCount: 1
+  image:
+    repository: localhost/dci_physical_infrastructure/network
+    tag: 0.3.7
+    pullPolicy: IfNotPresent
+  config:
+    logLevel: "2"
+    serverPort: 50052
+    sshPrivateKeyPath: "/etc/ssh-keys/id_ed25519"
+  ssh:
+    secretName: physical-infrastructure-ssh-keys
+  service:
+    type: ClusterIP
+    port: 81
+  tls:
+    enabled: true
+    secretName: network-server-tls
+    certPath: /etc/network/tls
+    issuerName: shared-root-ca
+    issuerKind: ClusterIssuer
+    commonName: physical-infrastructure-network-service
+    dnsNames:
+      - physical-infrastructure-network-service.default.svc.cluster.local
+
+global:
+  db:
+    api:
+      accessUrl: https://192.168.1.1:6000/
+
+physical-infrastructure-log:
+  replicaCount: 1
+  image:
+    repository: localhost/dci_physical_infrastructure/log
+    tag: 0.3.7
+    pullPolicy: IfNotPresent
+  config:
+    logging:
+      ipmi:
+        logFile: server
+        logPath: /var/log/dci_physical_infrastructure/log
+        maxSize: 2048
+        maxBackups: 10
+        maxAge: 30
+      cdi:
+        logFile: cdi
+        logPath: /var/log/cdi_hhchk
+        maxSize: 2048
+        maxBackups: 10
+        maxAge: 30
+    cdisoft:
+      logFile: cdisoft
+      logPath:  /var/log/dci_physical_infrastructure/log
+      maxSize: 2048
+      maxBackups: 10
+      maxAge: 30
+    maasserver:
+      logFile: maas
+      logPath:  /var/log/dci_physical_infrastructure/log
+      maxSize: 2048
+      maxBackups: 10
+      maxAge: 30
+    logLevel: "2"
+    serverPort: 50054
+    interval: 10
+    sshPrivateKeyPath: "/etc/ssh-keys/id_ed25519"
+  ssh:
+    secretName: physical-infrastructure-ssh-keys
+  service:
+    type: ClusterIP
+    port: 83
+
+physical-infrastructure-exporter:
+  replicaCount: 1
+  image:
+    repository: localhost/dci_physical_infrastructure/exporter
+    tag: 0.3.7
+    pullPolicy: IfNotPresent
+  config:
+    metrics:
+      port: 50055
+      endpoint: "/metrics"
+    logLevel: "2"
+    interval: 10
+    p2pEnable: true
+    p2pInterval: 10
+    sshPrivateKeyPath: "/etc/ssh-keys/id_ed25519"
+  ssh:
+    secretName: physical-infrastructure-ssh-keys
+  service:
+    type: ClusterIP
+    port: 84

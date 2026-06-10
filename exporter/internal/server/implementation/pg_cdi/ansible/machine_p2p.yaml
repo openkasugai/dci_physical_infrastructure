@@ -1,0 +1,9 @@
+- hosts: all
+  become: no
+
+  tasks:
+    - name: machine p2p
+      import_role:
+        name: role_login_cdi
+      vars:
+        execute_cdi_command: "machine p2p -P {{ p2p }} -m {{ machine_name }} -g {{ group_name }}"

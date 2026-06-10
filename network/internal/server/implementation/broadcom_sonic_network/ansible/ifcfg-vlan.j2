@@ -1,0 +1,8 @@
+DEVICE={{ if_name }}.{{ vid }}
+TYPE=Vlan
+VLAN=yes
+VLAN_ID={{ vid }}
+PHYSDEV={{ if_name }}
+ONBOOT=yes
+BRIDGE=br-{{ if_name }}.{{ vid }}
+BOOTPROTO=none

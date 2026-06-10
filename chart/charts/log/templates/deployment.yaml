@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mychart.childName" (dict "Release" .Release "childChartName" "log") }}-deployment
+  labels:
+    app: {{ include "mychart.childName" (dict "Release" .Release "childChartName" "log") }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "mychart.childName" (dict "Release" .Release "childChartName" "log") }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "mychart.childName" (dict "Release" .Release "childChartName" "log") }}
+    spec:
+      serviceAccountName: {{ include "mychart.childName" (dict "Release" .Release "childChartName" "log") }}-sa
+      containers:
+        - name: {{ include "mychart.childName" (dict "Release" .Release "childChartName" "log") }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.config.serverPort }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "mychart.childName" (dict "Release" .Release "childChartName" "log") }}-config
+          env:
+            - name: PRODUCT_MAPPINGS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ .Release.Name }}-product-type-mappings
+                  key: mappings.json
+          volumeMounts:
+            - name: ssh-keys
+              mountPath: /etc/ssh-keys
+              readOnly: true
+            - name: {{ include "mychart.childName" (dict "Release" .Release "childChartName" "log") }}-ipmi-volume
+              mountPath: {{ .Values.config.logging.ipmi.logPath }}
+            - name: {{ include "mychart.childName" (dict "Release" .Release "childChartName" "log") }}-cdi-volume
+              mountPath: {{ .Values.config.logging.cdi.logPath }}
+      volumes:
+      - name: ssh-keys
+        secret:
+          secretName: {{ .Values.ssh.secretName }}
+          defaultMode: 0400
+      - name: {{ include "mychart.childName" (dict "Release" .Release "childChartName" "log") }}-ipmi-volume
+        hostPath:
+          path: {{ .Values.config.logging.ipmi.logPath }}
+          type: DirectoryOrCreate
+      - name: {{ include "mychart.childName" (dict "Release" .Release "childChartName" "log") }}-cdi-volume
+        hostPath:
+          path: {{ .Values.config.logging.cdi.logPath }}
+          type: DirectoryOrCreate

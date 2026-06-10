@@ -1,0 +1,58 @@
+- hosts: all
+  become: yes
+  gather_facts: no
+
+  tasks:
+    - name: check if vlan exists
+      shell: show vlan config | grep "Vlan{{ vid }} "
+      register: vlan_check_result
+      ignore_errors: true
+
+    - name: set vlan existence flag
+      set_fact:
+        vid_exists: "{{ vlan_check_result.stdout != '' }}"
+
+    - name: check if vlan member exists
+      shell: show vlan config | grep "Vlan{{ vid }} " | grep "{{ interface }} "
+      register: vlan_member_check_result
+      ignore_errors: true
+      when: vid_exists
+
+    - name: set vlan member existence flag
+      set_fact:
+        vlan_member_exists: "{{ vlan_member_check_result.stdout != '' if vid_exists else false }}"
+
+    - name: add vlan
+      ansible.builtin.shell: |
+        config vlan add {{ vid }}
+      register: add_vlan_result
+      when: not vid_exists
+
+    - name: add vlan member(untagged)
+      ansible.builtin.shell: |
+        config vlan member add -u {{ vid }} {{ interface }}
+      register: add_vlan_member_untagged_result
+      when: type == "Port" and vid_exists and not vlan_member_exists
+
+    - name: add vlan member(tagged)
+      ansible.builtin.shell: |
+        config vlan member add {{ vid }} {{ interface }}
+      register: add_vlan_member_tagged_result
+      when: type == "Trunk" and vid_exists and not vlan_member_exists
+
+    - name: save config
+      ansible.builtin.shell: |
+        config save -y
+      when: >-
+        add_vlan_result is changed or
+        add_vlan_member_untagged_result is changed or
+        add_vlan_member_tagged_result is changed
+
+    - name: show vlan
+      ansible.builtin.shell: |
+        show vlan config | grep Vlan{{ vid }}
+      register: __result
+
+    - name: result output
+      debug:
+        msg: "{{ __result.stdout_lines }}"

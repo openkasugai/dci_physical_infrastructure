@@ -1,0 +1,12 @@
+- hosts: all
+  become: no
+  gather_facts: no
+
+  tasks:
+    - name: get counter
+      shell: "show interface counters"
+      register: __result
+
+    - name: result output
+      debug:
+        msg: "{{ __result.stdout_lines }}"

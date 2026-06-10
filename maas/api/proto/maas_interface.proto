@@ -1,0 +1,325 @@
+// Copyright 2026 NTT, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto3";
+
+package protomaas;
+
+import "validate/validate.proto";
+import "google/protobuf/wrappers.proto";
+import "common/api/proto/common_interface.proto";
+
+// Package for go
+option go_package = "maas_module/api/proto;protomaas";
+
+// Enum for detail error code
+enum DetailCode {
+  ZERO = 0;
+	IF_PARAMETER_INVALID   = 41;
+	UNSUPPORT_PRODUCT      = 42;
+	IF_SEQUENCE_ERROR      = 52;
+	IF_CANCEL_UNAVAILABLE  = 53;
+	MAAS_ENVIRONMENT_ERROR = 61;
+	MAAS_RESPONSE_INVALID  = 81;
+}
+
+// Define service for MaaS
+service Maas {
+  rpc MachineRegister (MachineRegisterRequest) returns (MachineRegisterResponse) {}
+  rpc MachineDelete (MachineDeleteRequest) returns (MachineDeleteResponse) {}
+  rpc OsDeploy (OsDeployRequest) returns (OsDeployResponse) {}
+  rpc OsRelease (OsReleaseRequest) returns (OsReleaseResponse) {}
+  rpc VmCompose (VmComposeRequest) returns (VmComposeResponse) {}
+  rpc VmDelete (VmDeleteRequest) returns (VmDeleteResponse) {}
+  rpc MachineList (MachineListRequest) returns (MachineListResponse) {}
+  rpc MachineShow (MachineShowRequest) returns (MachineShowResponse) {}
+  rpc Cancel (CancelRequest) returns (CancelResponse) {}
+  rpc NetworkUpdate (NetworkUpdateRequest) returns (NetworkUpdateResponse) {}
+  rpc PowerOn (PowerOnRequest) returns (PowerOnResponse) {}
+  rpc PowerOff (PowerOffRequest) returns (PowerOffResponse) {}
+  rpc KubeadmReset (KubeadmResetRequest) returns (KubeadmResetResponse) {}
+  rpc KubeadmJoin (KubeadmJoinRequest) returns (KubeadmJoinResponse) {}
+}
+
+// message of Product information
+message ProductInformation {
+  string vendor       = 1 [(validate.rules).string = {min_len: 1, max_len: 128}];   // vendor name
+  string product_name = 2 [(validate.rules).string = {min_len: 1, max_len: 128}];   // product name
+  string version      = 3 [(validate.rules).string = {min_len: 1, max_len: 128}];   // version
+  optional string os  = 4 [(validate.rules).string = {min_len: 1, max_len: 128}];   // os info
+}
+
+// message of MAAS information
+message MaasInformation {
+  string access_url   = 1 [(validate.rules).string = {min_len: 1, max_len: 128}];   // access URL for MaaS server
+  string api_key      = 2 [(validate.rules).string = {min_len: 1, max_len: 255}];   // API-KEY for MaaS server
+}
+
+// Network information
+message NetworkInformation {
+  string mac_address = 1 [(validate.rules).string = {
+    min_len: 1, 
+    max_len: 17,
+    pattern: "^([0-9A-Fa-f]{2}:){5}([0-9A-Fa-f]{2})$"
+  }];   // MAC address for target NIC (format: XX:XX:XX:XX:XX:XX)
+  
+  string cidr = 2 [(validate.rules).string = {
+    min_len: 1, 
+    max_len: 18,
+    pattern: "^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)/(3[0-2]|[1-2]?[0-9])$"
+  }];   // CIDR for specified machine (format: x.x.x.x/y)
+  
+  optional string address_start = 3 [(validate.rules).string.ipv4 = true];  // Min. IP range in specified cidr (format: x.x.x.x)
+  
+  optional string address_end = 4 [(validate.rules).string.ipv4 = true];    // Max. IP range in specified cidr (format: x.x.x.x)
+}
+
+// OS information
+message OsInformation {
+  string distribution            = 1 [(validate.rules).string = {min_len: 1, max_len: 32}];   // OS distribution
+  string version                 = 2 [(validate.rules).string = {min_len: 1, max_len: 32}];   // OS version
+}
+
+// Network information for CNI
+message NetworkInformationCni {
+  string if_name = 1 [(validate.rules).string = {min_len: 1, max_len: 15}];   // IF name on create Virtual Machine
+  
+  string bridge_name = 2 [(validate.rules).string = {min_len: 1, max_len: 15}];   // bridge name of the host to which the IF is connected
+  
+  string cidr = 3 [(validate.rules).string = {
+    min_len: 1, 
+    max_len: 18,
+    pattern: "^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)/(3[0-2]|[1-2]?[0-9])$"
+  }];   // CIDR on create Virtual Machine (format: x.x.x.x/y)
+  
+  optional string address_start = 4 [(validate.rules).string.ipv4 = true];  // Min. IP range in specified cidr (format: x.x.x.x)
+  
+  optional string address_end = 5 [(validate.rules).string.ipv4 = true];    // Max. IP range in specified cidr (format: x.x.x.x)
+}
+
+// Request message for MachineRegister
+message MachineRegisterRequest {
+  ProductInformation product_info = 1 [(validate.rules).message.required = true];               // Product information
+  MaasInformation maas_info       = 2 [(validate.rules).message.required = true];               // MAAS information
+  string host_name                = 3 [(validate.rules).string = {min_len: 1, max_len: 255}];   // host name 
+  string mac_address              = 4 [(validate.rules).string = {                              // MAC address for specified machine (format: XX:XX:XX:XX:XX:XX)
+    min_len: 1, 
+    max_len: 17,
+    pattern: "^([0-9A-Fa-f]{2}:){5}([0-9A-Fa-f]{2})$"
+  }];
+  string ipmi_address             = 5 [(validate.rules).string.ipv4 = true];                    // IPMI IP address for specified machine (format: x.x.x.x)
+  string ipmi_user                = 6 [(validate.rules).string = {min_len: 1, max_len: 64}];    // IPMI login user for specified machine
+  string ipmi_password            = 7 [(validate.rules).string = {min_len: 1, max_len: 64}];    // IPMI login password for specified machine
+  repeated NetworkInformation network_information = 8 [(validate.rules).repeated = {min_items: 1}];   // Network information list
+  optional string extra_parameter = 9;                                                          // Product extension parameters
+}
+
+// Response message for MachineRegister
+message MachineRegisterResponse {
+  optional common.ResultCode result = 1;    // result of command (ACCEPT or ERROR)
+  string error_message = 2;          // error message
+  string system_id = 3;              // system-id managed by MaaS
+}
+
+// Request message for MachineDelete
+message MachineDeleteRequest {
+  ProductInformation product_info = 1 [(validate.rules).message.required = true];           // Product information
+  MaasInformation maas_info       = 2 [(validate.rules).message.required = true];           // MAAS information
+  string system_id                = 3 [(validate.rules).string = {min_len: 1, max_len: 6}]; // system-id managed by MaaS
+  optional string extra_parameter = 4;                                                      // Product extension parameters
+}
+
+// Response message for MachineDelete
+message MachineDeleteResponse {
+  optional common.ResultCode result = 1;    // result of command (ACCEPT or ERROR)
+  string error_message = 2;          // error message
+}
+
+// Request message for OsDeploy
+message OsDeployRequest {
+  ProductInformation product_info   = 1 [(validate.rules).message.required = true];           // Product information
+  MaasInformation maas_info         = 2 [(validate.rules).message.required = true];           // MAAS information
+  string system_id                  = 3 [(validate.rules).string = {min_len: 1, max_len: 6}]; // system-id managed by MaaS
+  google.protobuf.BoolValue vm_flag = 4 [(validate.rules).message.required = true];           // flag for vm host
+  OsInformation os                  = 5 [(validate.rules).message.required = true];           // OS information
+  string user_data		              = 6;						                                          // User data for cloud init
+  optional string extra_parameter   = 7;						                                          // Product extension parameters
+}
+
+// Response message for OsDeploy
+message OsDeployResponse {
+  optional common.ResultCode result = 1;    // result of command (ACCEPT or ERROR)
+  string error_message = 2;          // error message
+}
+
+// Request message for OsRelease
+message OsReleaseRequest {
+  ProductInformation product_info = 1 [(validate.rules).message.required = true];            // Product information
+  MaasInformation maas_info       = 2 [(validate.rules).message.required = true];            // MAAS information
+  string system_id                = 3 [(validate.rules).string = {min_len: 1, max_len: 6}];  // system-id managed by MaaS
+  optional string extra_parameter = 4;						                                           // Product extension parameters
+}
+
+// Response message for OsRelease
+message OsReleaseResponse {
+  optional common.ResultCode result = 1;    // result of command (ACCEPT or ERROR)
+  string error_message = 2;          // error message
+}
+
+// Request message for VmCompose
+message VmComposeRequest {
+  ProductInformation product_info           = 1 [(validate.rules).message.required = true];                               // Product information
+  MaasInformation maas_info                 = 2 [(validate.rules).message.required = true];                               // MAAS information
+  string system_id                          = 3 [(validate.rules).string = {min_len: 1, max_len: 6}];  	 			            // system-id managed by MaaS (for host machine)
+  string host_name                          = 4 [(validate.rules).string = {min_len: 1, max_len: 255}];  			            // host name (for guest-vm)
+  optional int32 cpu_core                   = 5 [(validate.rules).int32.gte = 1, (validate.rules).int32.lte = 99999];     // core of CPU
+  optional int32 memory                     = 6 [(validate.rules).int32.gte = 1, (validate.rules).int32.lte = 99999999];	// memory (MiB)
+  optional int32 disk_size                  = 7 [(validate.rules).int32.gte = 1, (validate.rules).int32.lte = 960]; 		  // disk size (GB)
+  repeated NetworkInformationCni network_information = 8 [(validate.rules).repeated = {min_items: 1}];   		              // Network information list
+  optional string extra_parameter           = 9;                                                                          // Product extension parameters
+}
+
+// Response message for VmCompose
+message VmComposeResponse {
+  optional common.ResultCode result = 1;    // result of command (ACCEPT or ERROR)
+  string error_message = 2;          // error message
+  string system_id = 3;              // system-id managed by MaaS
+}
+
+// Request message for VmDelete
+message VmDeleteRequest {
+  ProductInformation product_info = 1 [(validate.rules).message.required = true];            // Product information
+  MaasInformation maas_info       = 2 [(validate.rules).message.required = true];            // MAAS information
+  string system_id                = 3 [(validate.rules).string = {min_len: 1, max_len: 6}];  // system-id managed by MaaS
+  optional string extra_parameter = 4;                                                       // Product extension parameters
+}
+
+// Response message for VmDelete
+message VmDeleteResponse {
+  optional common.ResultCode result = 1;    // result of command (ACCEPT or ERROR)
+  string error_message = 2;          // error message
+}
+
+// Request message for MachineList
+message MachineListRequest {
+  ProductInformation product_info = 1 [(validate.rules).message.required = true];   // Product information
+  MaasInformation maas_info       = 2 [(validate.rules).message.required = true];   // MAAS information
+  optional string extra_parameter = 3;                                              // Product extension parameters
+}
+
+// Response message for MachineList
+message MachineListResponse {
+  optional common.ResultCode result = 1;    // result of command (SUCCESS or ERROR)
+  string error_message = 2;          // error message
+  string data = 3;                   // information of machine-list (JSON string)
+}
+
+// Request message for MachineShow
+message MachineShowRequest {
+  ProductInformation product_info = 1 [(validate.rules).message.required = true];             // Product information
+  MaasInformation maas_info       = 2 [(validate.rules).message.required = true];             // MAAS information
+  string system_id                = 3 [(validate.rules).string = {min_len: 1, max_len: 6}];   // system-id managed by MaaS
+  optional string extra_parameter = 4;                                                        // Product extension parameters
+}
+
+// Response message for MachineShow
+message MachineShowResponse {
+  optional common.ResultCode result = 1;    // result of command (SUCCESS or ERROR)
+  string error_message = 2;          // error message
+  string data = 3;                   // information of a machine (JSON string)
+}
+
+// Request message for Cancel
+message CancelRequest {
+  ProductInformation product_info = 1 [(validate.rules).message.required = true];             // Product information
+  MaasInformation maas_info       = 2 [(validate.rules).message.required = true];             // MAAS information
+  string system_id                = 3 [(validate.rules).string = {min_len: 1, max_len: 6}];   // system-id managed by MaaS
+  optional string extra_parameter = 4;                                                        // Product extension parameters
+}
+
+// Response message for Cancel
+message CancelResponse {
+  optional common.ResultCode result = 1;    // result of command (ACCEPT or ERROR)
+  string error_message = 2;          // error message
+}
+
+// Request message for NetworkUpdate
+message NetworkUpdateRequest {
+  ProductInformation product_info = 1 [(validate.rules).message.required = true];                   // Product information
+  MaasInformation maas_info       = 2 [(validate.rules).message.required = true];                   // MAAS information
+  string system_id                = 3 [(validate.rules).string = {min_len: 1, max_len: 6}];         // system-id managed by MaaS
+  repeated NetworkInformation network_information = 4 [(validate.rules).repeated = {min_items: 1}]; // Network information list
+  string user_data		            = 5;						                                                  // User data for cloud init
+  optional string extra_parameter = 6;                                                              // Product extension parameters
+}
+
+// Response message for NetworkUpdate
+message NetworkUpdateResponse {
+  optional common.ResultCode result = 1;    // result of command (ACCEPT or ERROR)
+  string error_message = 2;          // error message
+}
+
+// Request message for PowerOn
+message PowerOnRequest {
+  ProductInformation product_info = 1 [(validate.rules).message.required = true];                   // Product information
+  MaasInformation maas_info       = 2 [(validate.rules).message.required = true];                   // MAAS information
+  string system_id                = 3 [(validate.rules).string = {min_len: 1, max_len: 6}];         // system-id managed by MaaS
+  string user_data		            = 4;						                                                  // User data for cloud init
+}
+
+// Response message for PowerOn
+message PowerOnResponse {
+  optional common.ResultCode result = 1;    // result of command (ACCEPT or ERROR)
+  string error_message = 2;          // error message
+}
+
+// Request message for PowerOff
+message PowerOffRequest {
+  ProductInformation product_info = 1 [(validate.rules).message.required = true];                   // Product information
+  MaasInformation maas_info       = 2 [(validate.rules).message.required = true];                   // MAAS information
+  string system_id                = 3 [(validate.rules).string = {min_len: 1, max_len: 6}];         // system-id managed by MaaS
+}
+
+// Response message for PowerOff
+message PowerOffResponse {
+  optional common.ResultCode result = 1;    // result of command (ACCEPT or ERROR)
+  string error_message = 2;          // error message
+}
+
+// Request message for KubeadmReset
+message KubeadmResetRequest {
+  ProductInformation product_info = 1 [(validate.rules).message.required = true];                   // Product information
+  MaasInformation maas_info       = 2 [(validate.rules).message.required = true];                   // MAAS information
+  string system_id                = 3 [(validate.rules).string = {min_len: 1, max_len: 6}];         // system-id managed by MaaS
+}
+
+// Response message for KubeadmReset
+message KubeadmResetResponse {
+  optional common.ResultCode result = 1;    // result of command (SUCCESS or ERROR)
+  string error_message = 2;          // error message
+}
+
+// Request message for KubeadmJoin
+message KubeadmJoinRequest {
+  ProductInformation product_info = 1 [(validate.rules).message.required = true];                   // Product information
+  MaasInformation maas_info       = 2 [(validate.rules).message.required = true];                   // MAAS information
+  string system_id                = 3 [(validate.rules).string = {min_len: 1, max_len: 6}];         // system-id managed by MaaS
+  repeated string cp_system_id    = 4 [(validate.rules).repeated = {min_items: 1, items: {string: {min_len: 1, max_len: 6}}}];    // system-id managed by MaaS For CP
+}
+
+// Response message for KubeadmJoin
+message KubeadmJoinResponse {
+  optional common.ResultCode result = 1;    // result of command (ACCEPT or ERROR)
+  string error_message = 2;          // error message
+}

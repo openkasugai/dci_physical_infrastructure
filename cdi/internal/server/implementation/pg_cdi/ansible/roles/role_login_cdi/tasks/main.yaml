@@ -1,0 +1,14 @@
+- name: Copy CdiWrapper from local to remote
+  copy:
+    src: ../../../CdiWrapper.sh
+    dest: ~/CdiWrapper.sh
+    mode: "0755"
+
+- name: login cdi and execute command
+  shell: "bash -i -c '~/CdiWrapper.sh -u {{ cdi_user | quote }} -p {{ cdi_password | quote }} -g {{ cdi_guest | quote }} {{ execute_cdi_command }}'"
+  register: __result
+  ignore_errors: true
+
+- name: Output result
+  debug:
+    msg: "{{ __result.stdout }}"

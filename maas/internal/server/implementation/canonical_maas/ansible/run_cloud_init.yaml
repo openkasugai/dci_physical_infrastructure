@@ -1,0 +1,191 @@
+- hosts: all
+  become: yes
+  gather_facts: no
+
+  # This playbook forces cloud-init to re-run using the NoCloud datasource with
+  # new user_data on a machine that was originally provisioned by MAAS.
+  #
+  # Background:
+  #   MAAS writes /etc/cloud/cloud.cfg.d/95-cloudconfig-maas-datasource.cfg at
+  #   deploy time, which pins datasource_list to [MAAS].  cloud-init 24.4 appends
+  #   datasource_list values across config files rather than replacing them, so
+  #   simply adding a 99-*.cfg with [NoCloud] would still result in [MAAS, NoCloud]
+  #   and MAAS would win.  In addition, cloud-init clean does NOT clear the
+  #   runtime merged-config cache under /run/cloud-init/, so the MAAS datasource
+  #   selection persists unless that directory is removed explicitly.
+  #
+  #   To prevent MAAS user_data from re-running on reboot, the original MAAS
+  #   instance state (/var/lib/cloud/instances/<id>) is backed up before
+  #   cloud-init clean and restored after the NoCloud run completes.
+  #
+  # Required variable:
+  #   user_data: base64-encoded cloud-config content to apply.
+
+  tasks:
+    # Decode the base64 user_data variable and write it as a cloud-init config
+    # fragment.  Using cloud.cfg.d/ ensures it is picked up by all datasources.
+    - name: Write decoded user_data to /etc/cloud/cloud.cfg.d/100-user_data.cfg
+      copy:
+        content: "{{ user_data | b64decode }}"
+        dest: /etc/cloud/cloud.cfg.d/100-user_data.cfg
+        mode: '0644'
+
+    # The NoCloud datasource reads user-data and meta-data from a local seed
+    # directory.  Create the directory before populating it.
+    - name: Create NoCloud seed directory
+      file:
+        path: /var/lib/cloud/seed/nocloud
+        state: directory
+        mode: '0755'
+
+    # Copy the decoded user_data into the NoCloud seed so that cloud-init picks
+    # it up when the NoCloud datasource is selected.
+    - name: Set user-data for NoCloud seed
+      copy:
+        src: /etc/cloud/cloud.cfg.d/100-user_data.cfg
+        dest: /var/lib/cloud/seed/nocloud/user-data
+        remote_src: yes
+
+    # The NoCloud datasource requires a meta-data file alongside user-data.
+    # Provide a minimal one with a fixed instance-id so cloud-init treats this
+    # as a new instance and runs all modules.
+    - name: Set meta-data for NoCloud seed
+      copy:
+        content: "instance-id: iid-nocloud\n"
+        dest: /var/lib/cloud/seed/nocloud/meta-data
+
+    # Override datasource_list so that only NoCloud is tried.  This config file
+    # has a higher priority (99) than MAAS's 95-* file, but because cloud-init
+    # 24.4 appends datasource_list values, the MAAS config file itself must also
+    # be removed (see "Backup and remove MAAS datasource config" task below).
+    - name: Override datasource to NoCloud only
+      copy:
+        content: "datasource_list: [ NoCloud ]\n"
+        dest: /etc/cloud/cloud.cfg.d/99-datasource-override.cfg
+        mode: '0644'
+
+    # Save the current MAAS instance-id to /root/ so it survives a reboot.
+    # This is used later to restore the MAAS instance state after the NoCloud
+    # run, preventing MAAS user_data from re-running on the next reboot.
+    - name: Backup current instance-id
+      shell: cat /var/lib/cloud/data/instance-id > /root/cloud-init-instance-id.bak
+      changed_when: true
+      failed_when: false
+
+    # Archive the MAAS instance directory and cloud-init data directory so they
+    # can be restored after cloud-init clean wipes them.  Without this, rebooting
+    # after cloud-init clean causes MAAS to treat the machine as a new instance
+    # and re-run the original MAAS user_data (kubernetes/cri-o setup, etc.).
+    - name: Backup current cloud-init instance state
+      shell: |
+        INSTANCE_ID=$(cat /root/cloud-init-instance-id.bak 2>/dev/null)
+        if [ -n "$INSTANCE_ID" ] && [ -d "/var/lib/cloud/instances/$INSTANCE_ID" ]; then
+          tar czf /tmp/cloud-init-instance-backup.tar.gz \
+            /var/lib/cloud/instances/"$INSTANCE_ID" \
+            /var/lib/cloud/data
+        fi
+      changed_when: true
+
+    # Remove the MAAS datasource config so that datasource_list is no longer
+    # appended with [MAAS].  The file is backed up to /root/ for restoration
+    # after the NoCloud run completes.
+    - name: Backup and remove MAAS datasource config
+      shell: |
+        SRC="/etc/cloud/cloud.cfg.d/95-cloudconfig-maas-datasource.cfg"
+        if [ -f "$SRC" ]; then
+          cp "$SRC" /root/95-cloudconfig-maas-datasource.cfg.bak
+          rm -f "$SRC"
+        fi
+      changed_when: true
+
+    # Write the re-run script that will be executed asynchronously via
+    # systemd-run after cloud-init clean.  The script:
+    #   1. Removes /run/cloud-init/ to clear the merged-config cache so that
+    #      cloud-init re-reads the config files (without the MAAS datasource).
+    #   2. Runs cloud-init init phases to select the NoCloud datasource and
+    #      write the instance pickle (obj.pkl) required by later modules.
+    #   3. Verifies that NoCloud was actually selected; exits with error if not.
+    #   4. Runs config and final module stages to apply the new user_data.
+    #   5. Cleans up the temporary NoCloud seed and override config.
+    #   6. Restores the MAAS datasource config and MAAS instance state so that
+    #      subsequent reboots continue to use the MAAS datasource normally
+    #      without re-running MAAS user_data.
+    - name: Write cloud-init re-run script
+      copy:
+        content: |
+          #!/bin/bash
+          MAAS_DATASOURCE_CFG="/etc/cloud/cloud.cfg.d/95-cloudconfig-maas-datasource.cfg"
+          MAAS_DATASOURCE_BAK="/root/95-cloudconfig-maas-datasource.cfg.bak"
+          INSTANCE_BACKUP="/tmp/cloud-init-instance-backup.tar.gz"
+          INSTANCE_ID=$(cat /root/cloud-init-instance-id.bak 2>/dev/null)
+
+          # Restore the MAAS datasource config and the original MAAS instance
+          # state so that reboots use the MAAS datasource without re-running
+          # MAAS user_data.  Called on both success and error paths.
+          restore_state() {
+            if [ -f "$MAAS_DATASOURCE_BAK" ]; then
+              cp "$MAAS_DATASOURCE_BAK" "$MAAS_DATASOURCE_CFG"
+            fi
+            if [ -f "$INSTANCE_BACKUP" ] && [ -n "$INSTANCE_ID" ]; then
+              tar xzf "$INSTANCE_BACKUP" -C /
+              echo "$INSTANCE_ID" > /var/lib/cloud/data/instance-id
+              rm -f /var/lib/cloud/instance
+              ln -sf "/var/lib/cloud/instances/$INSTANCE_ID" /var/lib/cloud/instance
+            fi
+          }
+
+          # Clear the runtime merged-config cache.  cloud-init clean does not
+          # remove /run/cloud-init/, so the stale datasource_list=[MAAS] entry
+          # would persist unless this directory is deleted explicitly.
+          rm -rf /run/cloud-init/
+
+          # Run the local (pre-network) and network init phases.  The network
+          # phase is required because it writes obj.pkl to the instance
+          # directory; cloud-init modules --mode=config fails without it.
+          cloud-init init --local
+          cloud-init init
+
+          # Verify that cloud-init actually selected the NoCloud datasource.
+          # If MAAS was selected instead (e.g. due to remaining config), abort
+          # and restore state to avoid corrupting the MAAS instance.
+          DATASOURCE=$(cat /var/lib/cloud/instance/datasource 2>/dev/null)
+          if [[ "$DATASOURCE" != *"NoCloud"* ]]; then
+            echo "ERROR: datasource is not NoCloud: $DATASOURCE"
+            restore_state
+            exit 1
+          fi
+
+          # Apply the new user_data through the config and final module stages.
+          cloud-init modules --mode=config
+          cloud-init modules --mode=final
+
+          # Remove the temporary NoCloud artifacts now that the run is complete.
+          rm -f /etc/cloud/cloud.cfg.d/99-datasource-override.cfg
+          rm -rf /var/lib/cloud/seed/nocloud
+
+          # Restore MAAS state so the machine behaves normally after reboot.
+          restore_state
+        dest: /tmp/cloud-init-rerun.sh
+        mode: '0755'
+
+    # Stop all cloud-init related systemd units before cleaning state.
+    # Errors are ignored because some units may already be inactive.
+    - name: Stop cloud services
+      shell: systemctl stop 'cloud*'
+      failed_when: false
+      changed_when: true
+
+    # Wipe cloud-init's persistent state so it treats the next run as a fresh
+    # boot.  Note: this does NOT remove /run/cloud-init/ (handled in the
+    # re-run script) and does NOT restore instance state (handled by
+    # restore_state in the re-run script).
+    - name: Run cloud-init clean
+      command: cloud-init clean
+      changed_when: true
+
+    # Launch the re-run script asynchronously as a transient systemd service so
+    # that it continues running after the Ansible SSH connection closes.
+    # Execution order: init --local → init → modules config → modules final.
+    - name: Launch cloud-init asynchronously via systemd-run
+      shell: systemd-run --unit=cloud-init-rerun /tmp/cloud-init-rerun.sh
+      changed_when: true

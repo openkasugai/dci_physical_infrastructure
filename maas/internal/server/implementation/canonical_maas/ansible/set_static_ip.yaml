@@ -1,0 +1,49 @@
+- hosts: all
+  become: yes
+  gather_facts: no
+
+  tasks:
+    - name: Validate required parameters
+      fail:
+        msg: "Required parameter missing: interface_name and ip_with_prefix_list are required"
+      when: interface_name is not defined or ip_with_prefix_list is not defined
+
+    - name: Get current connection name for interface
+      shell: "nmcli -t -f NAME,DEVICE connection show | grep '{{ interface_name }}' | cut -d: -f1 | head -n1"
+      register: connection_name
+      failed_when: false
+      changed_when: false
+
+    - name: Set connection name variable
+      set_fact:
+        conn_name: "{{ connection_name.stdout if connection_name.stdout != '' else interface_name }}"
+
+    - name: Configure static IP addresses using nmcli
+      command: >
+        nmcli connection modify "{{ conn_name }}"
+        ipv4.method manual
+        ipv4.addresses "{{ ip_with_prefix_list }}"
+      register: nmcli_modify
+      failed_when: nmcli_modify.rc != 0
+
+    - name: Bring connection down
+      command: nmcli connection down "{{ conn_name }}"
+      register: nmcli_down
+      failed_when: false
+      changed_when: nmcli_down.rc == 0
+
+    - name: Bring connection up with new configuration
+      command: nmcli connection up "{{ conn_name }}"
+      register: nmcli_up
+      failed_when: nmcli_up.rc != 0
+
+    - name: Verify IP addresses are set
+      shell: |
+        {% for ip in ip_with_prefix_list.split(',') %}
+        ip addr show "{{ interface_name }}" | grep -q "inet {{ ip }}" || exit 1
+        {% endfor %}
+      register: ip_verify
+      retries: 3
+      delay: 2
+      until: ip_verify.rc == 0
+      changed_when: false

@@ -1,0 +1,20 @@
+{{- if .Values.tls.enabled }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "mychart.childName" (dict "Release" .Release "childChartName" "network") }}-cert
+  labels:
+    app: {{ include "mychart.childName" (dict "Release" .Release "childChartName" "network") }}
+spec:
+  secretName: {{ .Values.tls.secretName }}
+  issuerRef:
+    name: {{ .Values.tls.issuerName }}
+    kind: {{ .Values.tls.issuerKind }}
+  commonName: {{ .Values.tls.commonName }}
+  {{- if .Values.tls.dnsNames }}
+  dnsNames:
+    {{- range .Values.tls.dnsNames }}
+    - {{ . }}
+    {{- end }}
+  {{- end }}
+{{- end }}

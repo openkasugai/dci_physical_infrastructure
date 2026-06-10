@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "mychart.childName" (dict "Release" .Release "childChartName" "cdi") }}-config
+data:
+  LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  CDI_SERVER_PORT: {{ .Values.config.serverPort | quote }}
+  ANSIBLE_PATH: {{ .Values.config.ansiblePath | quote }}
+  SSH_KEY: {{ .Values.config.sshPrivateKeyPath | quote }}
+  TLS_ENABLE: {{ .Values.tls.enabled | quote }}
+  TLS_CERT_PATH: {{ .Values.tls.certPath | quote }}

@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "mychart.childName" (dict "Release" .Release "childChartName" "exporter") }}-config
+data:
+  LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  INTERVAL: {{ .Values.config.interval | quote }}
+  P2P_ENABLE: {{ .Values.config.p2pEnable | quote }}
+  P2P_INTERVAL: {{ .Values.config.p2pInterval | quote }}
+  ANSIBLE_PATH: {{ .Values.config.ansiblePath | quote }}
+  SSH_KEY: {{ .Values.config.sshPrivateKeyPath | quote }}
+  METRICS_PORT: {{ .Values.config.metrics.port | quote }}
+  METRICS_ENDPOINT: {{ .Values.config.metrics.endpoint | quote }}
+  DB_URL: {{ .Values.global.db.api.accessUrl | quote }}

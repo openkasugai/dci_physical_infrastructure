@@ -1,0 +1,13 @@
+- hosts: all
+  become: no
+
+  tasks:
+    - name: helth check cmd
+      shell: "./hhchk -F '{{ cdi_pass }}' -D '{{ director_pass}}'"
+      args:
+        chdir: /opt/epc/bin
+      register: hhchk_result
+
+    - name: result output
+      debug:
+        msg: "{{ hhchk_result.stdout_lines }}"

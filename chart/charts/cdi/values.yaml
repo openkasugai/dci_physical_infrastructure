@@ -1,0 +1,25 @@
+replicaCount: 1
+image:
+  repository: cdi
+  tag: 0.3.7
+  pullPolicy: IfNotPresent
+config:
+  logLevel: "2"
+  serverPort: 50051
+  sshPrivateKeyPath: "/etc/ssh-keys/id_ed25519"
+ssh:
+  secretName: physical-infrastructure-ssh-keys
+service:
+  type: ClusterIP
+  port: 80
+
+# TLS configuration
+tls:
+  enabled: true
+  secretName: cdi-server-tls
+  certPath: /etc/cdi/tls
+  issuerName: shared-root-ca
+  issuerKind: ClusterIssuer
+  commonName: physical-infrastructure-cdi-service
+  dnsNames:
+    - physical-infrastructure-cdi-service.default.svc.cluster.local

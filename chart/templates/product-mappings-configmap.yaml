@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-product-type-mappings
+  namespace: {{ .Release.Namespace }}
+data:
+  # TODO nw_products.BroadcomSonic の設定値は確認中
+  mappings.json: |
+    {
+      "nw_products": [
+        {"vendor": "edgecore networks", "product_name": "DCS208/AS5812-54X", "os": "Edgecore SONiC", "type": "EdgeCoreSonic"},
+        {"vendor": "edgecore networks", "product_name": "AS4625-54T", "os": "Edgecore SONiC", "type": "EdgeCoreSonic"},
+        {"vendor": "edgecore networks", "product_name": "AS7726-32X", "os": "Edgecore SONiC", "type": "EdgeCoreSonic"},
+        {"vendor": "celestica", "product_name": "DX010", "os": "Broadcom SONiC", "type": "BroadcomSonic"},
+        {"vendor": "dummy", "product_name": "dummy", "type": "Dummy"}
+      ],
+      "server_products": [
+        {"vendor": "dell", "product_name": "PowerEdge R760", "type": "Dell"},
+        {"vendor": "fujitsu", "product_name": "PRIMERGY RX2530 M7", "type": "Primergy"},
+        {"vendor": "supermicro", "product_name": "SYS-421GE-TNRT", "type": "Supermicro"},
+        {"vendor": "supermicro", "product_name": "SYS-212GB-NR", "type": "Supermicro"}
+      ],
+      "cdi_products": [
+        {"vendor": "fujitsu", "product_name": "PRIMERGY CDI", "version": "1.1", "type": "PG_CDI_1_1"},
+        {"vendor": "fujitsu", "product_name": "PRIMERGY CDI", "version": "1.0", "type": "PG_CDI_1_0"}
+      ],
+      "maas_products": [
+        {"vendor": "canonical", "product_name": "MAAS", "version": "3.6", "type": "Canonical"}
+      ]
+    }

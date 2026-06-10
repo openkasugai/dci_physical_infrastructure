@@ -1,0 +1,11 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: maas-client-cert
+  namespace: default
+spec:
+  secretName: maas-client-tls
+  issuerRef:
+    name: shared-root-ca
+    kind: ClusterIssuer
+  commonName: maas-client

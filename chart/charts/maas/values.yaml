@@ -1,0 +1,27 @@
+replicaCount: 1
+image:
+  repository: maas
+  tag: 0.3.7
+  pullPolicy: IfNotPresent
+config:
+  logLevel: "2"
+  serverPort: 50053
+  sshPrivateKeyPath: "/etc/ssh-keys/id_ed25519"
+  vmHostDisk: 120
+  lxdListenPort: 8443
+ssh:
+  secretName: physical-infrastructure-ssh-keys
+service:
+  type: ClusterIP
+  port: 82
+
+# TLS configuration
+tls:
+  enabled: true
+  secretName: maas-server-tls
+  certPath: /etc/maas/tls
+  issuerName: shared-root-ca
+  issuerKind: ClusterIssuer
+  commonName: physical-infrastructure-maas-service
+  dnsNames:
+    - physical-infrastructure-maas-service.default.svc.cluster.local

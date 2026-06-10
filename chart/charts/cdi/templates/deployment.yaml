@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mychart.childName" (dict "Release" .Release "childChartName" "cdi") }}-deployment
+  labels:
+    app: {{ include "mychart.childName" (dict "Release" .Release "childChartName" "cdi") }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "mychart.childName" (dict "Release" .Release "childChartName" "cdi") }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "mychart.childName" (dict "Release" .Release "childChartName" "cdi") }}
+    spec:
+      containers:
+        - name: {{ include "mychart.childName" (dict "Release" .Release "childChartName" "cdi") }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.config.serverPort }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "mychart.childName" (dict "Release" .Release "childChartName" "cdi") }}-config
+          env:
+            - name: PRODUCT_MAPPINGS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ .Release.Name }}-product-type-mappings
+                  key: mappings.json
+            - name: PG_CDI_MODEL_MAPPINGS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "mychart.childName" (dict "Release" .Release "childChartName" "cdi") }}-pg-cdi-model-mappings
+                  key: mappings.json
+          volumeMounts:
+            - name: ssh-keys
+              mountPath: /etc/ssh-keys
+              readOnly: true
+          {{- if .Values.tls.enabled }}
+            - name: tls-certs
+              mountPath: {{ .Values.tls.certPath }}
+              readOnly: true
+          {{- end }}
+      volumes:
+        - name: ssh-keys
+          secret:
+            secretName: {{ .Values.ssh.secretName }}
+            defaultMode: 0400
+      {{- if .Values.tls.enabled }}
+        - name: tls-certs
+          secret:
+            secretName: {{ .Values.tls.secretName }}
+      {{- end }}

@@ -1,0 +1,9 @@
+- hosts: all
+  become: no
+
+  tasks:
+    - name: machine power control
+      import_role:
+        name: role_login_cdi
+      vars:
+        execute_cdi_command: "machine power -P {{ power }} -m {{ machine_name }} -g {{ group_name }}"

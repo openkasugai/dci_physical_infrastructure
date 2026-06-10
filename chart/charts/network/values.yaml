@@ -1,0 +1,25 @@
+replicaCount: 1
+image:
+  repository: network
+  tag: 0.3.7
+  pullPolicy: IfNotPresent
+config:
+  logLevel: "2"
+  serverPort: 50052
+  sshPrivateKeyPath: "/etc/ssh-keys/id_ed25519"
+ssh:
+  secretName: physical-infrastructure-ssh-keys
+service:
+  type: ClusterIP
+  port: 81
+
+# TLS configuration
+tls:
+  enabled: true
+  secretName: network-server-tls
+  certPath: /etc/network/tls
+  issuerName: shared-root-ca
+  issuerKind: ClusterIssuer
+  commonName: physical-infrastructure-network-service
+  dnsNames:
+    - physical-infrastructure-network-service.default.svc.cluster.local

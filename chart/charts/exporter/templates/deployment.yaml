@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mychart.childName" (dict "Release" .Release "childChartName" "exporter") }}-deployment
+  labels:
+    app: {{ include "mychart.childName" (dict "Release" .Release "childChartName" "exporter") }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "mychart.childName" (dict "Release" .Release "childChartName" "exporter") }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "mychart.childName" (dict "Release" .Release "childChartName" "exporter") }}
+    spec:
+      serviceAccountName: {{ include "mychart.childName" (dict "Release" .Release "childChartName" "exporter") }}-sa
+      containers:
+        - name: {{ include "mychart.childName" (dict "Release" .Release "childChartName" "exporter") }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.config.metrics.port }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "mychart.childName" (dict "Release" .Release "childChartName" "exporter") }}-config
+          env:
+            - name: PRODUCT_MAPPINGS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ .Release.Name }}-product-type-mappings
+                  key: mappings.json
+          volumeMounts:
+            - name: ssh-keys
+              mountPath: /etc/ssh-keys
+              readOnly: true
+      volumes:
+        - name: ssh-keys
+          secret:
+            secretName: {{ .Values.ssh.secretName }}
+            defaultMode: 0400

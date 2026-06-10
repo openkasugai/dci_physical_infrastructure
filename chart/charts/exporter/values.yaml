@@ -1,0 +1,29 @@
+replicaCount: 1
+image:
+  repository: localhost/dci_physical_infrastructure/exporter
+  tag: 0.3.7
+  pullPolicy: IfNotPresent
+config:
+  metrics:
+    port: 50055
+    endpoint: "/metrics"
+  logLevel: "2"
+  interval: 10
+  p2pEnable: true
+  p2pInterval: 10
+  sshPrivateKeyPath: "/etc/ssh-keys/id_ed25519"
+ssh:
+  secretName: physical-infrastructure-ssh-keys
+service:
+  type: ClusterIP
+  port: 84
+
+global:
+  db:
+    host: database-cluster-rw.database.svc.cluster.local
+    port: 5432
+    dbname: app
+    username: postgres
+    secretRef:
+      name: database-cluster-app
+      namespace: database

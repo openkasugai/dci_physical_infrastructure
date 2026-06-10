@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "mychart.childName" (dict "Release" .Release "childChartName" "log") }}-config
+data:
+  LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  INTERVAL: {{ .Values.config.interval | quote }}
+  ANSIBLE_PATH: {{ .Values.config.ansiblePath | quote }}
+  SSH_KEY: {{ .Values.config.sshPrivateKeyPath | quote }}
+  IPMI_LOGFILE: {{ .Values.config.logging.ipmi.logFile | quote }}
+  IPMI_LOGPATH: {{ .Values.config.logging.ipmi.logPath | quote }}
+  IPMI_MAXSIZE: {{ .Values.config.logging.ipmi.maxSize | quote }}
+  IPMI_MAXBACKUPS: {{ .Values.config.logging.ipmi.maxBackups | quote }}
+  IPMI_MAXAGE: {{ .Values.config.logging.ipmi.maxAge | quote }}
+  CDI_LOGFILE: {{ .Values.config.logging.cdi.logFile | quote }}
+  CDI_LOGPATH: {{ .Values.config.logging.cdi.logPath | quote }}
+  CDI_MAXSIZE: {{ .Values.config.logging.cdi.maxSize | quote }}
+  CDI_MAXBACKUPS: {{ .Values.config.logging.cdi.maxBackups | quote }}
+  CDI_MAXAGE: {{ .Values.config.logging.cdi.maxAge | quote }}
+  CDISOFT_LOGFILE: {{ .Values.config.logging.cdisoft.logFile | quote }}
+  CDISOFT_LOGPATH: {{ .Values.config.logging.cdisoft.logPath | quote }}
+  CDISOFT_MAXSIZE: {{ .Values.config.logging.cdisoft.maxSize | quote }}
+  CDISOFT_MAXBACKUPS: {{ .Values.config.logging.cdisoft.maxBackups | quote }}
+  CDISOFT_MAXAGE: {{ .Values.config.logging.cdisoft.maxAge | quote }}
+  MAASSERVER_LOGFILE: {{ .Values.config.logging.maasserver.logFile | quote }}
+  MAASSERVER_LOGPATH: {{ .Values.config.logging.maasserver.logPath | quote }}
+  MAASSERVER_MAXSIZE: {{ .Values.config.logging.maasserver.maxSize | quote }}
+  MAASSERVER_MAXBACKUPS: {{ .Values.config.logging.maasserver.maxBackups | quote }}
+  MAASSERVER_MAXAGE: {{ .Values.config.logging.maasserver.maxAge | quote }}
+  DB_URL: {{ .Values.global.db.api.accessUrl | quote }}

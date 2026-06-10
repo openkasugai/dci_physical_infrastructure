@@ -1,0 +1,14 @@
+{
+  "product_info": {
+    "vendor": "fujitsu",
+    "product_name": "PRIMERGY CDI",
+    "version": "1.0",
+    "os": "Linux"
+  },
+  "cdi_info": {
+    "remote_host": "192.168.1.10",
+    "remote_user": "admin"
+  },
+  "group_name": "testgroup",
+  "extra_parameter": "{ \"cdi_guest\": \"192.168.1.20\", \"cdi_user\": \"cdiuser\", \"cdi_password\": \"password\" }"
+}

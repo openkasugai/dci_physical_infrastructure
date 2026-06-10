@@ -1,0 +1,8 @@
+- hosts: all
+  gather_facts: yes
+
+  tasks:
+    - name: Get system uptime
+      debug:
+        msg:
+          uptime_seconds: "{{ ansible_uptime_seconds }}"

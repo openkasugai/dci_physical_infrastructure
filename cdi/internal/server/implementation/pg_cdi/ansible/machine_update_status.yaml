@@ -1,0 +1,9 @@
+- hosts: all
+  become: no
+
+  tasks:
+    - name: machine update status
+      import_role:
+        name: role_login_cdi
+      vars:
+        execute_cdi_command: "machine update_status -m  {{ machine_name }} -g {{ group_name }} -s {{ status }}"

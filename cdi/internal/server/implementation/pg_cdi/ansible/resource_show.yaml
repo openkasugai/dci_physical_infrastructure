@@ -1,0 +1,9 @@
+- hosts: all
+  become: no
+
+  tasks:
+    - name: resoure show
+      import_role:
+        name: role_login_cdi
+      vars:
+        execute_cdi_command: "resource show -r {{ resource_name }} -o JSON"

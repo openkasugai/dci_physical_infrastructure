@@ -1,0 +1,10 @@
+- hosts: all
+  become: yes
+  gather_facts: no
+
+  tasks:
+    - name: Add LXD Trust Certificate
+      shell: |
+        /var/lib/snapd/snap/bin/lxc config trust add - <<EOF
+        {{ certificate | replace('\n', '\n        ') }}
+        EOF

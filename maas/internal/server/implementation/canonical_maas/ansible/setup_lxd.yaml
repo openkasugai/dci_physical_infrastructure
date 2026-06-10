@@ -1,0 +1,52 @@
+- hosts: all
+  become: yes
+  gather_facts: no
+
+  tasks:
+    - name: Import EPEL repository key
+      rpm_key:
+        state: present
+        key: "https://dl.fedoraproject.org/pub/epel/RPM-GPG-KEY-EPEL-9"
+
+    - name: Install EPEL repository
+      dnf:
+        name: https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
+        state: present
+
+    - name: Install snapd
+      yum:
+        name: snapd
+        state: present
+
+    - name: Start and enable snapd
+      systemd:
+        name: snapd
+        state: started
+        enabled: yes
+
+    - name: Install LXD snap
+      snap:
+        name: lxd
+        classic: yes  # Required for LXD
+
+    - name: Create LXD preseed file
+      template:
+        src: lxd_pressed.j2
+        dest: /tmp/lxd_preseed.yml
+
+    - name: Initialize LXD with preseed file
+      shell: /var/lib/snapd/snap/bin/lxd init --preseed < /tmp/lxd_preseed.yml
+
+    - name: Check if firewalld is running
+      systemd:
+        name: firewalld
+      register: firewalld_status
+      ignore_errors: yes
+
+    - name: Open firewall port for LXD
+      firewalld:
+        port: "{{ lxd_port }}/tcp"
+        permanent: true
+        state: enabled
+        immediate: yes  # Reload firewall immediately
+      when: firewalld_status.status.ActiveState == "active"
