@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package implementation
 
 import (
@@ -113,21 +99,21 @@ var (
 			Name: "server_cpu_usage",
 			Help: "CPU usage",
 		},
-		[]string{"serverId"},
+		[]string{"serverId", "systemId"},
 	)
 	memoryGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "server_memory_usage",
 			Help: "Memory usage",
 		},
-		[]string{"serverId"},
+		[]string{"serverId", "systemId"},
 	)
 	p2pEnableGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Name: "server_p2p_enable",
 			Help: "P2P Enable Status",
 		},
-		[]string{"serverId"},
+		[]string{"serverId", "systemId"},
 	)
 )
 
@@ -166,14 +152,14 @@ func (l MetricsImplement) Finalize() {
 }
 
 func (l MetricsImplement) Write(metrics *prometheus.GaugeVec, label prometheus.Labels, value float64, writedMetrics *[]interfaces.MetricLabel) (err error) {
-	l.Logger.V(2).Info("start Write", "label", label, "value", value)
+	l.Logger.V(3).Info("start Write", "label", label, "value", value)
 	defer func() {
-		l.Logger.V(2).Info("end Write", "err", err)
+		l.Logger.V(3).Info("end Write", "err", err)
 	}()
 
 	// update metrics
 	metrics.With(label).Set(value)
-	l.Logger.V(2).Info("branch: metric value set successfully", "label", label, "value", value)
+	l.Logger.V(3).Info("branch: metric value set successfully", "label", label, "value", value)
 
     // append to writed metrics list if provided
     if writedMetrics != nil {
@@ -181,22 +167,22 @@ func (l MetricsImplement) Write(metrics *prometheus.GaugeVec, label prometheus.L
             Metrics: metrics,
             Label:   label,
         })
-        l.Logger.V(2).Info("branch: metric added to tracking list", "label", label, "listSize", len(*writedMetrics))
+		l.Logger.V(3).Info("branch: metric added to tracking list", "label", label, "listSize", len(*writedMetrics))
     } else {
-        l.Logger.V(2).Info("branch: metric tracking not enabled", "label", label)
+		l.Logger.V(3).Info("branch: metric tracking not enabled", "label", label)
     }
 
 	return nil
 }
 
 func (l MetricsImplement) Delete(metrics *prometheus.GaugeVec, label prometheus.Labels) (err error) {
-	l.Logger.V(2).Info("start Delete", "label", label)
+	l.Logger.V(3).Info("start Delete", "label", label)
 	defer func() {
-		l.Logger.V(2).Info("end Delete", "err", err)
+		l.Logger.V(3).Info("end Delete", "err", err)
 	}()
 
 	// delete metrics
 	metrics.Delete(label)
-	l.Logger.V(2).Info("branch: metric deleted successfully", "label", label)
+	l.Logger.V(3).Info("branch: metric deleted successfully", "label", label)
 	return nil
 }

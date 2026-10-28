@@ -2,7 +2,7 @@ physical-infrastructure-cdi:
   replicaCount: 1
   image:
     repository: localhost/dci_physical_infrastructure/cdi
-    tag: 0.3.7
+    tag: 1.0.0
     pullPolicy: IfNotPresent
   config:
     logLevel: "2"
@@ -27,7 +27,7 @@ physical-infrastructure-maas:
   replicaCount: 1
   image:
     repository: localhost/dci_physical_infrastructure/maas
-    tag: 0.3.7
+    tag: 1.0.0
     pullPolicy: IfNotPresent
   config:
     logLevel: "2"
@@ -35,6 +35,8 @@ physical-infrastructure-maas:
     sshPrivateKeyPath: "/etc/ssh-keys/id_ed25519"
     vmHostDisk: 80
     lxdListenPort: 8443
+    maasApiRetryCount: 10
+    maasApiRetryIntervalSeconds: 5
   ssh:
     secretName: physical-infrastructure-ssh-keys
   service:
@@ -54,7 +56,7 @@ physical-infrastructure-network:
   replicaCount: 1
   image:
     repository: localhost/dci_physical_infrastructure/network
-    tag: 0.3.7
+    tag: 1.0.0
     pullPolicy: IfNotPresent
   config:
     logLevel: "2"
@@ -84,7 +86,7 @@ physical-infrastructure-log:
   replicaCount: 1
   image:
     repository: localhost/dci_physical_infrastructure/log
-    tag: 0.3.7
+    tag: 1.0.0
     pullPolicy: IfNotPresent
   config:
     logging:
@@ -114,7 +116,7 @@ physical-infrastructure-log:
       maxAge: 30
     logLevel: "2"
     serverPort: 50054
-    interval: 10
+    interval: 60
     sshPrivateKeyPath: "/etc/ssh-keys/id_ed25519"
   ssh:
     secretName: physical-infrastructure-ssh-keys
@@ -126,16 +128,16 @@ physical-infrastructure-exporter:
   replicaCount: 1
   image:
     repository: localhost/dci_physical_infrastructure/exporter
-    tag: 0.3.7
+    tag: 1.0.0
     pullPolicy: IfNotPresent
   config:
     metrics:
       port: 50055
       endpoint: "/metrics"
     logLevel: "2"
-    interval: 10
+    interval: 60
     p2pEnable: true
-    p2pInterval: 10
+    p2pInterval: 60
     sshPrivateKeyPath: "/etc/ssh-keys/id_ed25519"
   ssh:
     secretName: physical-infrastructure-ssh-keys

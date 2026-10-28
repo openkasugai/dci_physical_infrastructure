@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package extra_parameters
 
 import (
@@ -26,6 +12,8 @@ func TestPgCDIExtraParameters_StructFields(t *testing.T) {
 		CDIPassword:         "test-password",
 		CDIMgrGuestUser:     "guest-user",
 		CDIMgrGuestPassword: "guest-password",
+		CDIMgrHost:          "10.0.0.1",
+		CDIMgrHostUser:      "host-user",
 		CDIMgrHostPassword:  "host-password",
 		DirectorPassword:    "director-password",
 	}
@@ -45,6 +33,12 @@ func TestPgCDIExtraParameters_StructFields(t *testing.T) {
 	}
 	if params.CDIMgrGuestPassword != "guest-password" {
 		t.Errorf("CDIMgrGuestPassword = %v, want guest-password", params.CDIMgrGuestPassword)
+	}
+	if params.CDIMgrHost != "10.0.0.1" {
+		t.Errorf("CDIMgrHost = %v, want 10.0.0.1", params.CDIMgrHost)
+	}
+	if params.CDIMgrHostUser != "host-user" {
+		t.Errorf("CDIMgrHostUser = %v, want host-user", params.CDIMgrHostUser)
 	}
 	if params.CDIMgrHostPassword != "host-password" {
 		t.Errorf("CDIMgrHostPassword = %v, want host-password", params.CDIMgrHostPassword)
@@ -73,6 +67,12 @@ func TestPgCDIExtraParameters_EmptyStruct(t *testing.T) {
 	if params.CDIMgrGuestPassword != "" {
 		t.Errorf("Empty CDIMgrGuestPassword = %v, want empty string", params.CDIMgrGuestPassword)
 	}
+	if params.CDIMgrHost != "" {
+		t.Errorf("Empty CDIMgrHost = %v, want empty string", params.CDIMgrHost)
+	}
+	if params.CDIMgrHostUser != "" {
+		t.Errorf("Empty CDIMgrHostUser = %v, want empty string", params.CDIMgrHostUser)
+	}
 	if params.CDIMgrHostPassword != "" {
 		t.Errorf("Empty CDIMgrHostPassword = %v, want empty string", params.CDIMgrHostPassword)
 	}
@@ -87,6 +87,7 @@ func TestPgCDIExtraParameters_PartialValues(t *testing.T) {
 		CDIGuest:    "guest1",
 		CDIUser:     "user1",
 		CDIPassword: "pass1",
+		CDIMgrHost:  "10.0.0.2",
 		// Optional fields left empty
 	}
 
@@ -98,6 +99,9 @@ func TestPgCDIExtraParameters_PartialValues(t *testing.T) {
 	}
 	if params.CDIPassword != "pass1" {
 		t.Errorf("CDIPassword = %v, want pass1", params.CDIPassword)
+	}
+	if params.CDIMgrHost != "10.0.0.2" {
+		t.Errorf("CDIMgrHost = %v, want 10.0.0.2", params.CDIMgrHost)
 	}
 	if params.CDIMgrGuestUser != "" {
 		t.Errorf("Optional CDIMgrGuestUser should be empty, got %v", params.CDIMgrGuestUser)
@@ -119,6 +123,8 @@ func TestPgCDIExtraParameters_JSONTags(t *testing.T) {
 		CDIPassword:         "pass",
 		CDIMgrGuestUser:     "guser",
 		CDIMgrGuestPassword: "gpass",
+		CDIMgrHost:          "10.0.0.3",
+		CDIMgrHostUser:      "host-user",
 		CDIMgrHostPassword:  "hpass",
 		DirectorPassword:    "dpass",
 	}

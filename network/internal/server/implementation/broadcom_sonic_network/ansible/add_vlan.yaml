@@ -25,17 +25,28 @@
     - name: add vlan
       ansible.builtin.shell: |
         config vlan add {{ vid }}
+      register: add_vlan_result
       when: not vid_exists
 
     - name: add vlan member(untagged)
       ansible.builtin.shell: |
         config vlan member add -u {{ vid }} {{ interface }}
+      register: add_vlan_member_untagged_result
       when: type == "Port" and vid_exists and not vlan_member_exists
 
     - name: add vlan member(tagged)
       ansible.builtin.shell: |
         config vlan member add {{ vid }} {{ interface }}
+      register: add_vlan_member_tagged_result
       when: type == "Trunk" and vid_exists and not vlan_member_exists
+
+    - name: save config
+      ansible.builtin.shell: |
+        config save -y
+      when: >-
+        add_vlan_result is changed or
+        add_vlan_member_untagged_result is changed or
+        add_vlan_member_tagged_result is changed
 
     - name: show vlan
       ansible.builtin.shell: |

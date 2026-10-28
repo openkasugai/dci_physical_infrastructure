@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package implementation
 
 import (
@@ -489,4 +475,159 @@ ok: [test2.example.com] => {"changed": false, "msg": {"second": "match"}}
 		"first": "match",
 	}
 	assert.Equal(t, expectedMsg, output)
+}
+
+// TestAnsibleImplement_parseCDIWrapperOutput_Success_ReturnsJSON tests RESULT_TYPE:SUCCESS parsing
+func TestAnsibleImplement_parseCDIWrapperOutput_Success_ReturnsJSON(t *testing.T) {
+	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
+	defer cleanup()
+
+	ansible := &AnsibleImplement{Logger: klog.NewKlogr()}
+
+	output := []byte(`RESULT_TYPE:SUCCESS\n{\"Health\":\"OK\"}`)
+
+	result, err := ansible.parseCDIWrapperOutput(output)
+
+	assert.NoError(t, err)
+	assert.Equal(t, map[string]interface{}{"Health": "OK"}, result)
+}
+
+// TestAnsibleImplement_parseCDIWrapperOutput_ErrorV10_ReturnsError tests RESULT_TYPE:ERROR_V_1_0 parsing
+func TestAnsibleImplement_parseCDIWrapperOutput_ErrorV10_ReturnsError(t *testing.T) {
+	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
+	defer cleanup()
+
+	ansible := &AnsibleImplement{Logger: klog.NewKlogr()}
+
+	output := []byte(`msg": "RESULT_TYPE:ERROR_V_1_0\nfailed to get cdi data"`)
+
+	_, err := ansible.parseCDIWrapperOutput(output)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to get cdi data")
+}
+
+// TestAnsibleImplement_CmdExecute_CDISpecList_UsesCDIWrapperParser tests cdi_spec_list.yaml parsing path
+func TestAnsibleImplement_CmdExecute_CDISpecList_UsesCDIWrapperParser(t *testing.T) {
+	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
+	defer cleanup()
+
+	logger := klog.NewKlogr()
+
+	mockExecutor := MockCommandExecutor{
+		CommandFunc: func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+			wrapperOutput := `RESULT_TYPE:SUCCESS\n{\"Health\":\"OK\"}`
+			return exec.Command("echo", wrapperOutput)
+		},
+	}
+
+	ansible := &AnsibleImplement{
+		Logger:   logger,
+		Executor: mockExecutor,
+	}
+
+	result, err := ansible.CmdExecute(context.Background(), "test.example.com", "testuser", "cdi_spec_list.yaml", "")
+
+	assert.NoError(t, err)
+	assert.Nil(t, result)
+}
+
+// TestAnsibleImplement_parseCDIWrapperOutput_ErrorV11_ReturnsError tests RESULT_TYPE:ERROR_V_1_1 parsing
+func TestAnsibleImplement_parseCDIWrapperOutput_ErrorV11_ReturnsError(t *testing.T) {
+	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
+	defer cleanup()
+
+	ansible := &AnsibleImplement{Logger: klog.NewKlogr()}
+
+	output := []byte(`msg": "RESULT_TYPE:ERROR_V_1_1\nfailed to get cdi data v1.1"`)
+
+	_, err := ansible.parseCDIWrapperOutput(output)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to get cdi data v1.1")
+}
+
+// TestAnsibleImplement_parseCDIWrapperOutput_Unknown_ReturnsError tests RESULT_TYPE:UNKNOWN parsing
+func TestAnsibleImplement_parseCDIWrapperOutput_Unknown_ReturnsError(t *testing.T) {
+	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
+	defer cleanup()
+
+	ansible := &AnsibleImplement{Logger: klog.NewKlogr()}
+
+	output := []byte(`RESULT_TYPE:UNKNOWN\nunknown cdi response"`)
+
+	_, err := ansible.parseCDIWrapperOutput(output)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid cdi response")
+	assert.Contains(t, err.Error(), "unknown cdi response")
+}
+
+// TestAnsibleImplement_parseCDIWrapperOutput_Default_ReturnsError tests missing result type handling
+func TestAnsibleImplement_parseCDIWrapperOutput_Default_ReturnsError(t *testing.T) {
+	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
+	defer cleanup()
+
+	ansible := &AnsibleImplement{Logger: klog.NewKlogr()}
+
+	output := []byte(`this output has no cdi result type marker`)
+
+	_, err := ansible.parseCDIWrapperOutput(output)
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "No valid result type found")
+}
+
+// TestAnsibleImplement_parseCDIWrapperOutput_SuccessWithoutData_ReturnsNil tests SUCCESS with no payload lines
+func TestAnsibleImplement_parseCDIWrapperOutput_SuccessWithoutData_ReturnsNil(t *testing.T) {
+	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
+	defer cleanup()
+
+	ansible := &AnsibleImplement{Logger: klog.NewKlogr()}
+
+	output := []byte(`RESULT_TYPE:SUCCESS`)
+
+	result, err := ansible.parseCDIWrapperOutput(output)
+
+	assert.NoError(t, err)
+	assert.Nil(t, result)
+}
+
+// TestAnsibleImplement_parseCDIWrapperOutput_SuccessInvalidJSON_ReturnsError tests JSON parse failure in SUCCESS path
+func TestAnsibleImplement_parseCDIWrapperOutput_SuccessInvalidJSON_ReturnsError(t *testing.T) {
+	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
+	defer cleanup()
+
+	ansible := &AnsibleImplement{Logger: klog.NewKlogr()}
+
+	output := []byte(`RESULT_TYPE:SUCCESS\n{\"Health\":}`)
+
+	_, err := ansible.parseCDIWrapperOutput(output)
+
+	assert.Error(t, err)
+}
+
+// TestAnsibleImplement_CmdExecute_CDISpecList_ParseError_ReturnsError tests parse error propagation on cdi_spec_list.yaml
+func TestAnsibleImplement_CmdExecute_CDISpecList_ParseError_ReturnsError(t *testing.T) {
+	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
+	defer cleanup()
+
+	logger := klog.NewKlogr()
+
+	mockExecutor := MockCommandExecutor{
+		CommandFunc: func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+			wrapperOutput := `RESULT_TYPE:SUCCESS\n{\"Health\":}`
+			return exec.Command("echo", wrapperOutput)
+		},
+	}
+
+	ansible := &AnsibleImplement{
+		Logger:   logger,
+		Executor: mockExecutor,
+	}
+
+	result, err := ansible.CmdExecute(context.Background(), "test.example.com", "testuser", "cdi_spec_list.yaml", "")
+
+	assert.Error(t, err)
+	assert.Nil(t, result)
 }

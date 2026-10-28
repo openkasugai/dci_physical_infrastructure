@@ -41,16 +41,21 @@ func (m *MockMaasAnsible) EXPECT() *MockMaasAnsibleMockRecorder {
 }
 
 // CmdExecute mocks base method.
-func (m *MockMaasAnsible) CmdExecute(ctx context.Context, remoteHost, playbook, extrArgs string) ([]byte, error) {
+func (m *MockMaasAnsible) CmdExecute(ctx context.Context, remoteHost, playbook, extrArgs string, retryCount ...int) ([]byte, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CmdExecute", ctx, remoteHost, playbook, extrArgs)
+	varargs := []any{ctx, remoteHost, playbook, extrArgs}
+	for _, a := range retryCount {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "CmdExecute", varargs...)
 	ret0, _ := ret[0].([]byte)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // CmdExecute indicates an expected call of CmdExecute.
-func (mr *MockMaasAnsibleMockRecorder) CmdExecute(ctx, remoteHost, playbook, extrArgs any) *gomock.Call {
+func (mr *MockMaasAnsibleMockRecorder) CmdExecute(ctx, remoteHost, playbook, extrArgs any, retryCount ...any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CmdExecute", reflect.TypeOf((*MockMaasAnsible)(nil).CmdExecute), ctx, remoteHost, playbook, extrArgs)
+	varargs := append([]any{ctx, remoteHost, playbook, extrArgs}, retryCount...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CmdExecute", reflect.TypeOf((*MockMaasAnsible)(nil).CmdExecute), varargs...)
 }

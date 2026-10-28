@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package factory
 
 import (
@@ -25,6 +11,7 @@ import (
 	"maas_module/internal/server/implementation/canonical_maas/maas_api"
 	"maas_module/internal/server/interfaces"
 	"maas_module/internal/server/test_utils"
+	"maas_module/internal/server/utils"
 )
 
 // Helper function to create test data
@@ -405,4 +392,105 @@ func TestCreateMaasController_ConsistentInitialization(t *testing.T) {
 	if c1.Ansible == c2.Ansible {
 		t.Error("Expected different Ansible instances")
 	}
+}
+
+// TestCreateMaasController_JobManagerInitialized tests that JobManager is properly initialized
+func TestCreateMaasController_JobManagerInitialized(t *testing.T) {
+cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
+defer cleanup()
+cleanupMappings := setupProductMappings(t)
+defer cleanupMappings()
+
+// Arrange - Set up environment variables for K8s Job config
+t.Setenv("LOG_LEVEL", "2")
+t.Setenv("MAAS_SERVER_PORT", "50051")
+t.Setenv("VM_HOST_DISK", "50")
+t.Setenv("LXD_PORT", "8443")
+t.Setenv("SSH_KEY", "/test/key")
+t.Setenv("TLS_ENABLE", "false")
+t.Setenv("TLS_CERT_PATH", "/certs")
+t.Setenv("K8S_JOB_WORKER_IMAGE", "worker:v1.0")
+t.Setenv("K8S_JOB_SERVICE_ACCOUNT", "maas-worker")
+t.Setenv("K8S_JOB_SSH_SECRET_NAME", "test-ssh-secret")
+t.Setenv("K8S_JOB_TLS_SECRET_NAME", "test-tls-secret")
+t.Setenv("K8S_JOB_BACKOFF_LIMIT", "3")
+t.Setenv("K8S_JOB_TTL_SECONDS", "3600")
+t.Setenv("K8S_JOB_ACTIVE_DEADLINE_SECONDS", "7200")
+t.Setenv("MAAS_API_RETRY_COUNT", "10")
+t.Setenv("MAAS_API_RETRY_INTERVAL_SECONDS", "5")
+utils.ResetConfigForTesting()
+
+err := utils.InitializeConfig()
+if err != nil {
+t.Fatalf("Failed to initialize config: %v", err)
+}
+
+logger := klog.NewKlogr()
+productInfo := createTestProductInfo()
+maasInfo := createTestMaasInfo()
+
+// Act
+result := CreateMaasController(logger, productInfo, maasInfo)
+
+// Assert
+if result == nil {
+t.Error("Expected MaasController instance, got nil")
+}
+
+controller := result.(*canonical_maas.CanonicalMaasController)
+
+// Verify JobManager is initialized
+if controller.JobManager == nil {
+t.Error("Expected JobManager to be initialized, got nil")
+}
+}
+
+// TestCreateMaasController_K8sJobConfig_UsesEnvironmentVariables tests that K8s job config uses env vars
+func TestCreateMaasController_K8sJobConfig_UsesEnvironmentVariables(t *testing.T) {
+cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
+defer cleanup()
+cleanupMappings := setupProductMappings(t)
+defer cleanupMappings()
+
+// Arrange - Set specific K8s Job config values
+t.Setenv("LOG_LEVEL", "2")
+t.Setenv("MAAS_SERVER_PORT", "50051")
+t.Setenv("VM_HOST_DISK", "50")
+t.Setenv("LXD_PORT", "8443")
+t.Setenv("SSH_KEY", "/test/key")
+t.Setenv("TLS_ENABLE", "false")
+t.Setenv("TLS_CERT_PATH", "/certs")
+t.Setenv("K8S_JOB_WORKER_IMAGE", "custom-worker:v2.0")
+t.Setenv("K8S_JOB_SERVICE_ACCOUNT", "custom-sa")
+t.Setenv("K8S_JOB_SSH_SECRET_NAME", "test-ssh-secret")
+t.Setenv("K8S_JOB_TLS_SECRET_NAME", "test-tls-secret")
+t.Setenv("K8S_JOB_BACKOFF_LIMIT", "5")
+t.Setenv("K8S_JOB_TTL_SECONDS", "1800")
+t.Setenv("K8S_JOB_ACTIVE_DEADLINE_SECONDS", "3600")
+t.Setenv("MAAS_API_RETRY_COUNT", "10")
+t.Setenv("MAAS_API_RETRY_INTERVAL_SECONDS", "5")
+utils.ResetConfigForTesting()
+
+err := utils.InitializeConfig()
+if err != nil {
+t.Fatalf("Failed to initialize config: %v", err)
+}
+
+logger := klog.NewKlogr()
+productInfo := createTestProductInfo()
+maasInfo := createTestMaasInfo()
+
+// Act
+result := CreateMaasController(logger, productInfo, maasInfo)
+
+// Assert
+if result == nil {
+t.Error("Expected MaasController instance, got nil")
+}
+
+// Verify controller was created with proper config
+controller := result.(*canonical_maas.CanonicalMaasController)
+if controller.JobManager == nil {
+t.Error("Expected JobManager to be initialized")
+}
 }

@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package implementation
 
 import (
@@ -145,15 +131,15 @@ func TestCDISoftImplement_Collection_PGCDI10_Success(t *testing.T) {
 	mockAnsible.EXPECT().
 		CmdExecute(
 			gomock.Any(),
-			"192.168.10.1",
-			"guest_user1",
+			"192.168.1.1",
+			"host_user1",
 			"cdi_spec_list.yaml",
-			"cdi_user=guest_user1 cdi_password=guest_pass1 cdi_guest=192.168.10.1",
+			"cdi_user=soft_user1 cdi_password=soft_pass1 cdi_guest=192.168.10.1",
 		).
 		Return(nil, nil) // Success
 
 	mockLogging.EXPECT().
-		Write("192.168.10.1", "{\"Health\":\"OK\"}").
+		Write("192.168.1.1", "{\"Health\":\"OK\"}").
 		Return(nil)
 
 	// Create CDISoftImplement instance
@@ -167,6 +153,9 @@ func TestCDISoftImplement_Collection_PGCDI10_Success(t *testing.T) {
 	targetList := []interfaces.CDITargetList{
 		{
 			CDIHost:         "192.168.1.1",
+			CDIHostUser:     "host_user1",
+			CDISoftUser:     "soft_user1",
+			CDISoftPassword: "soft_pass1",
 			ProductInfo:     `{"vendor":"fujitsu","product_name":"PRIMERGY CDI","version":"1.0"}`,
 			ExtraParameters: `{"cdi_user":"user1","cdi_password":"pass1","cdi_guest":"192.168.10.1","cdimgr_guest_user":"guest_user1","cdimgr_guest_password":"guest_pass1"}`,
 		},
@@ -196,15 +185,15 @@ func TestCDISoftImplement_Collection_PGCDI11_Success(t *testing.T) {
 	mockAnsible.EXPECT().
 		CmdExecute(
 			gomock.Any(),
-			"192.168.10.2",
-			"guest_user2",
+			"192.168.1.2",
+			"host_user2",
 			"cdi_spec_list.yaml",
-			"cdi_user=guest_user2 cdi_password=guest_pass2 cdi_guest=192.168.10.2",
+			"cdi_user=soft_user2 cdi_password=soft_pass2 cdi_guest=192.168.10.2",
 		).
 		Return(nil, nil)
 
 	mockLogging.EXPECT().
-		Write("192.168.10.2", "{\"Health\":\"OK\"}").
+		Write("192.168.1.2", "{\"Health\":\"OK\"}").
 		Return(nil)
 
 	// Create CDISoftImplement instance
@@ -218,12 +207,63 @@ func TestCDISoftImplement_Collection_PGCDI11_Success(t *testing.T) {
 	targetList := []interfaces.CDITargetList{
 		{
 			CDIHost:         "192.168.1.2",
+			CDIHostUser:     "host_user2",
+			CDISoftUser:     "soft_user2",
+			CDISoftPassword: "soft_pass2",
 			ProductInfo:     `{"vendor":"fujitsu","product_name":"PRIMERGY CDI","version":"1.1"}`,
 			ExtraParameters: `{"cdi_user":"user2","cdi_password":"pass2","cdi_guest":"192.168.10.2","cdimgr_guest_user":"guest_user2","cdimgr_guest_password":"guest_pass2"}`,
 		},
 	}
 
 	// Execute Collection
+	assert.NotPanics(t, func() {
+		cdiSoft.Collection(targetList)
+	})
+}
+
+func TestCDISoftImplement_Collection_PGCDI20_Success(t *testing.T) {
+	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
+	defer cleanup()
+	cleanupMappings := test_utils.SetupProductMappings()
+	defer cleanupMappings()
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockAnsible := mocks.NewMockAnsible(ctrl)
+	mockLogging := mocks.NewMockLogging(ctrl)
+
+	mockAnsible.EXPECT().
+		CmdExecute(
+			gomock.Any(),
+			"192.168.1.20",
+			"host_user20",
+			"cdi_spec_list.yaml",
+			"cdi_user=soft_user20 cdi_password=soft_pass20 cdi_guest=192.168.10.20",
+		).
+		Return(nil, nil)
+
+	mockLogging.EXPECT().
+		Write("192.168.1.20", "{\"Health\":\"OK\"}").
+		Return(nil)
+
+	cdiSoft := CDISoftImplement{
+		Logger:  klog.Background(),
+		Ansible: mockAnsible,
+		Logging: mockLogging,
+	}
+
+	targetList := []interfaces.CDITargetList{
+		{
+			CDIHost:         "192.168.1.20",
+			CDIHostUser:     "host_user20",
+			CDISoftUser:     "soft_user20",
+			CDISoftPassword: "soft_pass20",
+			ProductInfo:     `{"vendor":"fujitsu","product_name":"PRIMERGY CDI","version":"2.0"}`,
+			ExtraParameters: `{"cdi_user":"user20","cdi_password":"pass20","cdi_guest":"192.168.10.20","cdimgr_guest_user":"guest_user20","cdimgr_guest_password":"guest_pass20"}`,
+		},
+	}
+
 	assert.NotPanics(t, func() {
 		cdiSoft.Collection(targetList)
 	})
@@ -250,7 +290,7 @@ func TestCDISoftImplement_Collection_AnsibleError_WritesNG(t *testing.T) {
 
 	// Should write NG status
 	mockLogging.EXPECT().
-		Write("192.168.10.1", "{\"Health\":\"NG\"}").
+		Write("192.168.1.1", "{\"Health\":\"NG\"}").
 		Return(nil)
 
 	// Create CDISoftImplement instance
@@ -264,6 +304,9 @@ func TestCDISoftImplement_Collection_AnsibleError_WritesNG(t *testing.T) {
 	targetList := []interfaces.CDITargetList{
 		{
 			CDIHost:         "192.168.1.1",
+			CDIHostUser:     "host_user1",
+			CDISoftUser:     "soft_user1",
+			CDISoftPassword: "soft_pass1",
 			ProductInfo:     `{"vendor":"fujitsu","product_name":"PRIMERGY CDI","version":"1.0"}`,
 			ExtraParameters: `{"cdi_user":"user1","cdi_password":"pass1","cdi_guest":"192.168.10.1","cdimgr_guest_user":"guest_user1","cdimgr_guest_password":"guest_pass1"}`,
 		},
@@ -300,6 +343,9 @@ func TestCDISoftImplement_Collection_InvalidExtraParameters_SkipsTarget(t *testi
 	targetList := []interfaces.CDITargetList{
 		{
 			CDIHost:         "192.168.1.1",
+			CDIHostUser:     "host_user1",
+			CDISoftUser:     "soft_user1",
+			CDISoftPassword: "soft_pass1",
 			ProductInfo:     `{"vendor":"fujitsu","product_name":"PRIMERGY CDI","version":"1.0"}`,
 			ExtraParameters: `{"invalid_json}`, // Invalid JSON
 		},
@@ -346,6 +392,9 @@ func TestCDISoftImplement_Collection_LoggingWriteError_ContinuesProcessing(t *te
 	targetList := []interfaces.CDITargetList{
 		{
 			CDIHost:         "192.168.1.1",
+			CDIHostUser:     "host_user1",
+			CDISoftUser:     "soft_user1",
+			CDISoftPassword: "soft_pass1",
 			ProductInfo:     `{"vendor":"fujitsu","product_name":"PRIMERGY CDI","version":"1.0"}`,
 			ExtraParameters: `{"cdi_user":"user1","cdi_password":"pass1","cdi_guest":"192.168.10.1","cdimgr_guest_user":"guest_user1","cdimgr_guest_password":"guest_pass1"}`,
 		},
@@ -434,18 +483,18 @@ func TestCDISoftImplement_Collection_MultipleTargets_ProcessesAll(t *testing.T) 
 
 	// First target - v1.0
 	mockAnsible.EXPECT().
-		CmdExecute(gomock.Any(), "192.168.10.1", gomock.Any(), gomock.Any(), gomock.Any()).
+		CmdExecute(gomock.Any(), "192.168.1.1", gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(nil, nil)
 	mockLogging.EXPECT().
-		Write("192.168.10.1", "{\"Health\":\"OK\"}").
+		Write("192.168.1.1", "{\"Health\":\"OK\"}").
 		Return(nil)
 
 	// Second target - v1.1
 	mockAnsible.EXPECT().
-		CmdExecute(gomock.Any(), "192.168.10.2", gomock.Any(), gomock.Any(), gomock.Any()).
+		CmdExecute(gomock.Any(), "192.168.1.2", gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(nil, nil)
 	mockLogging.EXPECT().
-		Write("192.168.10.2", "{\"Health\":\"OK\"}").
+		Write("192.168.1.2", "{\"Health\":\"OK\"}").
 		Return(nil)
 
 	// Create CDISoftImplement instance
@@ -459,11 +508,17 @@ func TestCDISoftImplement_Collection_MultipleTargets_ProcessesAll(t *testing.T) 
 	targetList := []interfaces.CDITargetList{
 		{
 			CDIHost:         "192.168.1.1",
+			CDIHostUser:     "host_user1",
+			CDISoftUser:     "soft_user1",
+			CDISoftPassword: "soft_pass1",
 			ProductInfo:     `{"vendor":"fujitsu","product_name":"PRIMERGY CDI","version":"1.0"}`,
 			ExtraParameters: `{"cdi_user":"user1","cdi_password":"pass1","cdi_guest":"192.168.10.1","cdimgr_guest_user":"guest_user1","cdimgr_guest_password":"guest_pass1"}`,
 		},
 		{
 			CDIHost:         "192.168.1.2",
+			CDIHostUser:     "host_user2",
+			CDISoftUser:     "soft_user2",
+			CDISoftPassword: "soft_pass2",
 			ProductInfo:     `{"vendor":"fujitsu","product_name":"PRIMERGY CDI","version":"1.1"}`,
 			ExtraParameters: `{"cdi_user":"user2","cdi_password":"pass2","cdi_guest":"192.168.10.2","cdimgr_guest_user":"guest_user2","cdimgr_guest_password":"guest_pass2"}`,
 		},

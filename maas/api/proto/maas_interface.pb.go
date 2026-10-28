@@ -2128,6 +2128,7 @@ type KubeadmJoinRequest struct {
 	MaasInfo      *MaasInformation       `protobuf:"bytes,2,opt,name=maas_info,json=maasInfo,proto3" json:"maas_info,omitempty"`          // MAAS information
 	SystemId      string                 `protobuf:"bytes,3,opt,name=system_id,json=systemId,proto3" json:"system_id,omitempty"`          // system-id managed by MaaS
 	CpSystemId    []string               `protobuf:"bytes,4,rep,name=cp_system_id,json=cpSystemId,proto3" json:"cp_system_id,omitempty"`  // system-id managed by MaaS For CP
+	NodeIp        string                 `protobuf:"bytes,5,opt,name=node_ip,json=nodeIp,proto3" json:"node_ip,omitempty"`                // node-ip of join node
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2188,6 +2189,13 @@ func (x *KubeadmJoinRequest) GetCpSystemId() []string {
 		return x.CpSystemId
 	}
 	return nil
+}
+
+func (x *KubeadmJoinRequest) GetNodeIp() string {
+	if x != nil {
+		return x.NodeIp
+	}
+	return ""
 }
 
 // Response message for KubeadmJoin
@@ -2436,14 +2444,15 @@ const file_api_proto_maas_interface_proto_rawDesc = "" +
 	"\x14KubeadmResetResponse\x12/\n" +
 	"\x06result\x18\x01 \x01(\x0e2\x12.common.ResultCodeH\x00R\x06result\x88\x01\x01\x12#\n" +
 	"\rerror_message\x18\x02 \x01(\tR\ferrorMessageB\t\n" +
-	"\a_result\"\xff\x01\n" +
+	"\a_result\"\xa1\x02\n" +
 	"\x12KubeadmJoinRequest\x12J\n" +
 	"\fproduct_info\x18\x01 \x01(\v2\x1d.protomaas.ProductInformationB\b\xfaB\x05\x8a\x01\x02\x10\x01R\vproductInfo\x12A\n" +
 	"\tmaas_info\x18\x02 \x01(\v2\x1a.protomaas.MaasInformationB\b\xfaB\x05\x8a\x01\x02\x10\x01R\bmaasInfo\x12&\n" +
 	"\tsystem_id\x18\x03 \x01(\tB\t\xfaB\x06r\x04\x10\x01\x18\x06R\bsystemId\x122\n" +
 	"\fcp_system_id\x18\x04 \x03(\tB\x10\xfaB\r\x92\x01\n" +
 	"\b\x01\"\x06r\x04\x10\x01\x18\x06R\n" +
-	"cpSystemId\"v\n" +
+	"cpSystemId\x12 \n" +
+	"\anode_ip\x18\x05 \x01(\tB\a\xfaB\x04r\x02x\x01R\x06nodeIp\"v\n" +
 	"\x13KubeadmJoinResponse\x12/\n" +
 	"\x06result\x18\x01 \x01(\x0e2\x12.common.ResultCodeH\x00R\x06result\x88\x01\x01\x12#\n" +
 	"\rerror_message\x18\x02 \x01(\tR\ferrorMessageB\t\n" +

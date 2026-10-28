@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package api_vmhosts
 
 import (
@@ -42,7 +28,7 @@ func (v *VMhosts) GET(ctx context.Context) (response_body.Resbody, error) {
 	}()
 
 	// execute API call to get VM hosts
-	statusCode, data, err := v.API.APIExecute(ctx, "GET", "vm-hosts/", "")
+	statusCode, data, err := v.API.APIExecute(ctx, "GET", "vm-hosts/", "", v.WithRetry)
 	if err != nil {
 		klog.V(2).InfoS("branch: VM hosts API execution failed", "error", err.Error())
 		return nil, err
@@ -88,7 +74,7 @@ func (v *VMhosts) POST(ctx context.Context, reqBody request_body.Reqbody) (respo
 
 	// execute API call to create a VM host
 	apiReqBody := fmt.Sprintf("power_address=%s&type=%s", req.PowerAddress, req.Type)
-	statusCode, data, err := v.API.APIExecute(ctx, "POST", "vm-hosts/", apiReqBody)
+	statusCode, data, err := v.API.APIExecute(ctx, "POST", "vm-hosts/", apiReqBody, v.WithRetry)
 	if err != nil {
 		klog.V(2).InfoS("branch: VM host creation API execution failed", "error", err.Error())
 		return nil, err
@@ -128,7 +114,7 @@ func (v *VMhostHostID) DELETE(ctx context.Context) (response_body.Resbody, error
 	}()
 
 	// execute API call to delete a VM host
-	statusCode, data, err := v.API.APIExecute(ctx, "DELETE", fmt.Sprintf("vm-hosts/%d/", v.HostID), "")
+	statusCode, data, err := v.API.APIExecute(ctx, "DELETE", fmt.Sprintf("vm-hosts/%d/", v.HostID), "", v.WithRetry)
 	if err != nil {
 		klog.V(2).InfoS("branch: VM host deletion API execution failed", "error", err.Error())
 		return nil, err
@@ -187,7 +173,7 @@ func (v *VMhostCompose) POST(ctx context.Context, reqBody request_body.Reqbody) 
 		"storage=storage:%d&interfaces=%s",
 		req.Cores, url.QueryEscape(req.HostName),
 		req.Memory, req.Storage, req.Interfaces)
-	statusCode, data, err := v.API.APIExecute(ctx, "POST", fmt.Sprintf("vm-hosts/%d/op-compose", v.HostID), apiReqBody)
+	statusCode, data, err := v.API.APIExecute(ctx, "POST", fmt.Sprintf("vm-hosts/%d/op-compose", v.HostID), apiReqBody, v.WithRetry)
 	if err != nil {
 		klog.V(2).InfoS("branch: VM host compose API execution failed", "error", err.Error())
 		return nil, err
@@ -267,7 +253,7 @@ func (v *VMhostParameters) POST(ctx context.Context, reqBody request_body.Reqbod
 	}()
 
 	// execute API call to get operation parameters for a VM host
-	statusCode, data, err := v.API.APIExecute(ctx, "GET", fmt.Sprintf("vm-hosts/%d/op-parameters", v.HostID), "")
+	statusCode, data, err := v.API.APIExecute(ctx, "GET", fmt.Sprintf("vm-hosts/%d/op-parameters", v.HostID), "", v.WithRetry)
 	if err != nil {
 		klog.V(2).InfoS("branch: VM host parameters API execution failed", "error", err.Error())
 		return nil, err
@@ -306,7 +292,7 @@ func (v *VMhostRefresh) POST(ctx context.Context, reqBody request_body.Reqbody) 
 	}()
 
 	// execute API call to refresh a VM host
-	statusCode, data, err := v.API.APIExecute(ctx, "POST", fmt.Sprintf("vm-hosts/%d/op-refresh", v.HostID), "")
+	statusCode, data, err := v.API.APIExecute(ctx, "POST", fmt.Sprintf("vm-hosts/%d/op-refresh", v.HostID), "", v.WithRetry)
 	if err != nil {
 		klog.V(2).InfoS("branch: VM host refresh API execution failed", "error", err.Error())
 		return nil, err

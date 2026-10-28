@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package utils
 
 import (
@@ -25,6 +11,23 @@ import (
 
 // Test helper to set environment variables and clean up after test
 func setTestEnv(t *testing.T, env map[string]string) {
+	defaults := map[string]string{
+		"K8S_JOB_WORKER_IMAGE":             "test-worker:latest",
+		"K8S_JOB_SERVICE_ACCOUNT":          "test-service-account",
+		"K8S_JOB_SSH_SECRET_NAME":          "test-ssh-secret",
+		"K8S_JOB_TLS_SECRET_NAME":          "test-tls-secret",
+		"K8S_JOB_BACKOFF_LIMIT":            "1",
+		"K8S_JOB_TTL_SECONDS":              "600",
+		"K8S_JOB_ACTIVE_DEADLINE_SECONDS":  "7200",
+		"MAAS_API_RETRY_COUNT":             "10",
+		"MAAS_API_RETRY_INTERVAL_SECONDS":  "5",
+	}
+	for key, value := range defaults {
+		if _, exists := env[key]; !exists {
+			env[key] = value
+		}
+	}
+
 	// Set test environment variables
 	for key, value := range env {
 		os.Setenv(key, value)
@@ -715,6 +718,13 @@ func TestGetEnvVarName_AllFields_ReturnsCorrectNames(t *testing.T) {
 		{"SshKey", "SSH_KEY"},
 		{"TlsEnable", "TLS_ENABLE"},
 		{"TlsCertPath", "TLS_CERT_PATH"},
+		{"K8sJobWorkerImage", "K8S_JOB_WORKER_IMAGE"},
+		{"K8sJobServiceAccount", "K8S_JOB_SERVICE_ACCOUNT"},
+		{"K8sJobSSHSecretName", "K8S_JOB_SSH_SECRET_NAME"},
+		{"K8sJobTLSSecretName", "K8S_JOB_TLS_SECRET_NAME"},
+		{"K8sJobBackoffLimit", "K8S_JOB_BACKOFF_LIMIT"},
+		{"K8sJobTTLSeconds", "K8S_JOB_TTL_SECONDS"},
+		{"K8sJobActiveDeadlineSecs", "K8S_JOB_ACTIVE_DEADLINE_SECONDS"},
 		{"UnknownField", "UnknownField"},
 	}
 
@@ -752,7 +762,7 @@ func TestFormatValidationError_ValidatorErrors_ReturnsFormattedMessage(t *testin
 	}
 
 	errorMsg := result.Error()
-	expectedFields := []string{"LOG_LEVEL is required", "MAAS_SERVER_PORT is required"}
+	expectedFields := []string{"LOG_LEVEL is required", "MAAS_SERVER_PORT is required", "K8S_JOB_WORKER_IMAGE is required"}
 	for _, expected := range expectedFields {
 		if !strings.Contains(errorMsg, expected) {
 			t.Errorf("Expected error message to contain '%s', got: %s", expected, errorMsg)

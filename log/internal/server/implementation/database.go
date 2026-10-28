@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package implementation
 
 import (
@@ -59,9 +45,9 @@ func (l *DatabaseImplement) Init() (err error) {
 		l.Logger.Error(err, "failed to retrieve JWT from Kubernetes Secret")
 		return fmt.Errorf("failed to retrieve JWT: %w", err)
 	}
-	l.Logger.V(2).Info("branch: JWT retrieved successfully")
+	l.Logger.V(3).Info("branch: JWT retrieved successfully")
 
-	l.Logger.V(2).Info("branch: database connection established successfully")
+	l.Logger.V(3).Info("branch: database connection established successfully")
 	l.Logger.Info("database initialization completed successfully")
 	return
 }
@@ -82,7 +68,7 @@ func (l *DatabaseImplement) SelectCDITable() (targetList []interfaces.CDITargetL
 		l.Logger.V(2).Info("end SelectCDITable", "targetListCount", len(targetList), "err", err)
 	}()
 
-	l.Logger.Info("selecting CDI table data")
+	l.Logger.V(3).Info("selecting CDI table data")
 
 	// API call to get cdi data
 	cdi := db.TCdi{}
@@ -97,11 +83,11 @@ func (l *DatabaseImplement) SelectCDITable() (targetList []interfaces.CDITargetL
 		l.Logger.V(2).Info("branch: invalid data format in API response", "error", err.Error())
 		return
 	}
-	l.Logger.V(2).Info("branch: database query successful", "recordCount", len(cdis))
+	l.Logger.V(3).Info("branch: database query successful", "recordCount", len(cdis))
 
 	for _, cdi := range cdis {
 		product := models.ParseProductTypeFromJSON[models.CDIProductType](cdi.ProductInfo)
-		if (product == models.PG_CDI_1_0 || product == models.PG_CDI_1_1) {	// PG-CDI
+		if (product == models.PG_CDI_1_0 || product == models.PG_CDI_1_1 || product == models.PG_CDI_2_0) {	// PG-CDI
 			// parse extra parameter
 			extraParameter, err := ParseExtraParameter(cdi.ExtraParameters)
 			if err != nil {
@@ -117,14 +103,14 @@ func (l *DatabaseImplement) SelectCDITable() (targetList []interfaces.CDITargetL
 				ExtraParameters:	cdi.ExtraParameters,
 			})
 		} else {
-			l.Logger.V(2).Info("branch: ", "target is unsupport product", "ProductInfo", cdi.ProductInfo)
+			l.Logger.V(3).Info("branch: ", "target is unsupport product", "ProductInfo", cdi.ProductInfo)
 			continue
 		}
 
-		l.Logger.V(2).Info("branch: added CDI target", "cdiHost", cdi.RemoteHost, "ProductInfo", cdi.ProductInfo)
+		l.Logger.V(3).Info("branch: added CDI target", "cdiHost", cdi.RemoteHost, "ProductInfo", cdi.ProductInfo)
 	}
 
-	l.Logger.Info("CDI table selection completed", "targetCount", len(targetList))
+	l.Logger.V(3).Info("CDI table selection completed", "targetCount", len(targetList))
 	return
 }
 
@@ -134,7 +120,7 @@ func (l *DatabaseImplement) SelectServerTable() (targetList []interfaces.IPMITar
 		l.Logger.V(2).Info("end SelectServerTable", "targetListCount", len(targetList), "err", err)
 	}()
 
-	l.Logger.Info("selecting server table data")
+	l.Logger.V(3).Info("selecting server table data")
 
 	// API call to get logical server data
 	logicalServer := db.TLogicalServer{ Status: 1 }
@@ -149,16 +135,16 @@ func (l *DatabaseImplement) SelectServerTable() (targetList []interfaces.IPMITar
 		l.Logger.V(2).Info("branch: invalid data format in API response", "error", err.Error())
 		return
 	}
-	l.Logger.V(2).Info("branch: logical server query successful", "serverCount", len(servers))
+	l.Logger.V(3).Info("branch: logical server query successful", "serverCount", len(servers))
 
 	for _, server := range servers {
-		l.Logger.V(2).Info("processing server", "serverCotsID", server.CotsServerID, "serverCdiID", server.CdiComputeServerID)
+		l.Logger.V(3).Info("processing server", "serverCotsID", server.CotsServerID, "serverCdiID", server.CdiComputeServerID)
 
 		var target interfaces.IPMITargetList
 
 		// in caes os COTS server
 		if server.CotsServerID != nil {
-			l.Logger.V(2).Info("branch: processing COTS server", "cotsServerID", *server.CotsServerID)
+			l.Logger.V(3).Info("branch: processing COTS server", "cotsServerID", *server.CotsServerID)
 
 			// API call to get COTS server data
 			var resp interface{}
@@ -181,9 +167,9 @@ func (l *DatabaseImplement) SelectServerTable() (targetList []interfaces.IPMITar
 			target.IPMIPassword = cots.IpmiPassword
 			target.ProductInfo = cots.ProductInfo
 			target.ExtraParameters = cots.ExtraParameters
-			l.Logger.V(2).Info("branch: COTS server processed", "serverID", cotsServer.ServerID, "ipmiAddress", cotsServer.IpmiAddress)
+			l.Logger.V(3).Info("branch: COTS server processed", "serverID", cotsServer.ServerID, "ipmiAddress", cotsServer.IpmiAddress)
 		} else { // in case os Composed server
-			l.Logger.V(2).Info("branch: processing CDI server", "cdiComputeServerID", *server.CdiComputeServerID)
+			l.Logger.V(3).Info("branch: processing CDI server", "cdiComputeServerID", *server.CdiComputeServerID)
 
 			// API call to get CDI server data
 			var resp interface{}
@@ -206,14 +192,14 @@ func (l *DatabaseImplement) SelectServerTable() (targetList []interfaces.IPMITar
 			target.IPMIPassword = cdi.IpmiPassword
 			target.ProductInfo = cdi.ProductInfo
 			target.ExtraParameters = cdi.ExtraParameters
-			l.Logger.V(2).Info("branch: CDI server processed", "serverID", cdiServer.ServerID, "ipmiAddress", cdiServer.IpmiAddress)
+			l.Logger.V(3).Info("branch: CDI server processed", "serverID", cdiServer.ServerID, "ipmiAddress", cdiServer.IpmiAddress)
 		}
 
 		targetList = append(targetList, target)
-		l.Logger.V(2).Info("branch: server target added", "serverID", target.ServerID, "ProductInfo", target.ProductInfo)
+		l.Logger.V(3).Info("branch: server target added", "serverID", target.ServerID, "ProductInfo", target.ProductInfo)
 	}
 
-	l.Logger.Info("server table selection completed", "targetCount", len(targetList))
+	l.Logger.V(3).Info("server table selection completed", "targetCount", len(targetList))
 	return
 }
 
@@ -223,7 +209,7 @@ func (l DatabaseImplement) SelectMaasTable() (targetList []interfaces.MaasServer
 		l.Logger.V(2).Info("end SelectMaasTable", "targetListCount", len(targetList), "err", err)
 	}()
 
-	l.Logger.Info("selecting maas table data")
+	l.Logger.V(3).Info("selecting maas table data")
 
 	// API call to get Maas server data
 	maasServer := db.TMaas{}
@@ -238,10 +224,10 @@ func (l DatabaseImplement) SelectMaasTable() (targetList []interfaces.MaasServer
 		l.Logger.V(2).Info("branch: invalid data format in API response", "error", err.Error())
 		return
 	}
-	l.Logger.V(2).Info("branch: maas server query successful", "serverCount", len(servers))
+	l.Logger.V(3).Info("branch: maas server query successful", "serverCount", len(servers))
 	
 	for _, server := range servers {
-		l.Logger.V(2).Info("processing maas server", "maasId", server.MaasID, "physicalInfraId", server.PhysicalInfraId)
+		l.Logger.V(3).Info("processing maas server", "maasId", server.MaasID, "physicalInfraId", server.PhysicalInfraId)
 
 		var target interfaces.MaasServerTargetList
 		target.MaasAccessUrl = server.AccessURL
@@ -249,10 +235,10 @@ func (l DatabaseImplement) SelectMaasTable() (targetList []interfaces.MaasServer
 		target.ProductInfo = server.ProductInfo
 		targetList = append(targetList, target)
 
-		l.Logger.V(2).Info("branch: maas server target added", "maasId", server.MaasID, "physicalInfraId", server.PhysicalInfraId)
+		l.Logger.V(3).Info("branch: maas server target added", "maasId", server.MaasID, "physicalInfraId", server.PhysicalInfraId)
 	}
 
-	l.Logger.Info("maas server table selection completed", "targetCount", len(targetList))
+	l.Logger.V(3).Info("maas server table selection completed", "targetCount", len(targetList))
 	return
 }
 

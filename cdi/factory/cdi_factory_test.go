@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package factory
 
 import (
@@ -161,6 +147,32 @@ func TestCreateCDIController_DifferentLoggers_ReturnsControllers(t *testing.T) {
 	}
 }
 
+func TestCreateCDIController_PGCDI20_ReturnsController(t *testing.T) {
+	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
+	defer cleanup()
+
+	setupTestMappings(t)
+	defer cleanupTestMappings()
+
+	setupTestEnv()
+	defer teardownTestEnv()
+
+	err := utils.InitializeConfig()
+	if err != nil {
+		t.Fatalf("Failed to initialize config: %v", err)
+	}
+
+	logger := klog.Background()
+	os := "Linux"
+	controller := CreateCDIController(logger, &protocdi.ProductInformation{Vendor: "Fujitsu", ProductName: "PG-CDI", Version: "2.0", Os: &os})
+
+	if controller == nil {
+		t.Fatal("CreateCDIController returned nil for PG-CDI 2.0")
+	}
+
+	var _ interfaces.CDIController = controller
+}
+
 // Helper functions for test environment setup
 func setupTestEnv() {
 	os.Setenv("CDI_SERVER_PORT", "50051")
@@ -198,7 +210,8 @@ func setupTestMappings(t *testing.T) {
 		],
 		"cdi_products": [
 			{"vendor": "Fujitsu", "product_name": "PG-CDI", "version": "1.1", "os": "Linux", "type": "PG_CDI_1_1"},
-			{"vendor": "Fujitsu", "product_name": "PG-CDI", "version": "1.0", "os": "Linux", "type": "PG_CDI_1_0"}
+			{"vendor": "Fujitsu", "product_name": "PG-CDI", "version": "1.0", "os": "Linux", "type": "PG_CDI_1_0"},
+			{"vendor": "Fujitsu", "product_name": "PG-CDI", "version": "2.0", "os": "Linux", "type": "PG_CDI_2_0"}
 		],
 		"maas_products": [
 			{"vendor": "Canonical", "product_name": "MAAS", "version": "3.0", "os": "Ubuntu", "type": "Canonical"}

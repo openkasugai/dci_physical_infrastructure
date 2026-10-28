@@ -11,7 +11,9 @@ data:
         {"vendor": "edgecore networks", "product_name": "DCS208/AS5812-54X", "os": "Edgecore SONiC", "type": "EdgeCoreSonic"},
         {"vendor": "edgecore networks", "product_name": "AS4625-54T", "os": "Edgecore SONiC", "type": "EdgeCoreSonic"},
         {"vendor": "edgecore networks", "product_name": "AS7726-32X", "os": "Edgecore SONiC", "type": "EdgeCoreSonic"},
-        {"vendor": "celestica", "product_name": "DX010", "os": "Broadcom SONiC", "type": "BroadcomSonic"},
+        {"vendor": "edgecore networks", "product_name": "DCS208/AS5812-54X", "os": "Broadcom SONiC", "type": "BroadcomSonic"},
+        {"vendor": "edgecore networks", "product_name": "AS4625-54T", "os": "Broadcom SONiC", "type": "BroadcomSonic"},
+        {"vendor": "edgecore networks", "product_name": "AS7726-32X", "os": "Broadcom SONiC", "type": "BroadcomSonic"},
         {"vendor": "dummy", "product_name": "dummy", "type": "Dummy"}
       ],
       "server_products": [
@@ -22,7 +24,8 @@ data:
       ],
       "cdi_products": [
         {"vendor": "fujitsu", "product_name": "PRIMERGY CDI", "version": "1.1", "type": "PG_CDI_1_1"},
-        {"vendor": "fujitsu", "product_name": "PRIMERGY CDI", "version": "1.0", "type": "PG_CDI_1_0"}
+        {"vendor": "fujitsu", "product_name": "PRIMERGY CDI", "version": "1.0", "type": "PG_CDI_1_0"},
+        {"vendor": "fujitsu", "product_name": "PRIMERGY CDI", "version": "2.0", "type": "PG_CDI_2_0"}
       ],
       "maas_products": [
         {"vendor": "canonical", "product_name": "MAAS", "version": "3.6", "type": "Canonical"}

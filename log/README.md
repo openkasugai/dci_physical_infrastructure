@@ -12,7 +12,7 @@ This module provides Log monitoring functionality.
 To build the module, follow these steps:
 
 1.  **Prerequisites:**
-    *   Go (version 1.24.2)
+    *   Go (version 1.26.2)
     *   and, required helm, docer, make
 
 2.  **Clone the repository:**

@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package implementation
 
 import (
@@ -451,6 +437,7 @@ func TestDatabaseImplement_SelectServerTable_VMServer_ReturnsSuccess(t *testing.
 	defer ctrl.Finish()
 
 	vmServerID := "vm-001"
+	vmSystemID := "system-vm-001"
 
 	// Create mock API
 	mockAPI := mocks.NewMockAPI(ctrl)
@@ -461,6 +448,7 @@ func TestDatabaseImplement_SelectServerTable_VMServer_ReturnsSuccess(t *testing.
 		Return([]interface{}{
 			map[string]interface{}{
 				"cots_server_id":        vmServerID,
+				"system_id":             vmSystemID,
 				"cdi_compute_server_id": "",
 				"server_type":           float64(2), // VM
 				"status":                float64(1),
@@ -502,6 +490,7 @@ func TestDatabaseImplement_SelectServerTable_VMServer_ReturnsSuccess(t *testing.
 	// Verify VM target has correct fields
 	vmTarget := targetList[0]
 	assert.Equal(t, vmServerID, vmTarget.ServerID)
+	assert.Equal(t, vmSystemID, vmTarget.SystemID)
 	assert.True(t, vmTarget.P2PEnable)
 	// VM should not have IPMI or other COTS-specific fields populated
 	assert.Equal(t, "", vmTarget.IpmiAddress)
@@ -519,6 +508,8 @@ func TestDatabaseImplement_SelectServerTable_MixedServerTypes_ReturnsSuccess(t *
 
 	cotsServerID := "cots-001"
 	vmServerID := "vm-001"
+	cotsSystemID := "system-cots-001"
+	vmSystemID := "system-vm-001"
 
 	// Create mock API
 	mockAPI := mocks.NewMockAPI(ctrl)
@@ -529,6 +520,7 @@ func TestDatabaseImplement_SelectServerTable_MixedServerTypes_ReturnsSuccess(t *
 		Return([]interface{}{
 			map[string]interface{}{
 				"cots_server_id":        cotsServerID,
+				"system_id":             cotsSystemID,
 				"cdi_compute_server_id": "",
 				"server_type":           float64(1), // COTS
 				"status":                float64(1),
@@ -539,6 +531,7 @@ func TestDatabaseImplement_SelectServerTable_MixedServerTypes_ReturnsSuccess(t *
 			},
 			map[string]interface{}{
 				"cots_server_id":        vmServerID,
+				"system_id":             vmSystemID,
 				"cdi_compute_server_id": "",
 				"server_type":           float64(2), // VM
 				"status":                float64(1),
@@ -601,12 +594,14 @@ func TestDatabaseImplement_SelectServerTable_MixedServerTypes_ReturnsSuccess(t *
 	
 	// Verify COTS target has IPMI fields
 	assert.NotNil(t, cotsTarget)
+	assert.Equal(t, cotsSystemID, cotsTarget.SystemID)
 	assert.Equal(t, "10.10.10.1", cotsTarget.IpmiAddress)
 	assert.Equal(t, "IPMIUser1", cotsTarget.IpmiUser)
 	assert.Equal(t, "pass1", cotsTarget.IpmiPassword)
 	
 	// Verify VM target does not have IPMI fields
 	assert.NotNil(t, vmTarget)
+	assert.Equal(t, vmSystemID, vmTarget.SystemID)
 	assert.Equal(t, "", vmTarget.IpmiAddress)
 	assert.Equal(t, "", vmTarget.IpmiUser)
 	assert.Equal(t, "", vmTarget.IpmiPassword)
@@ -684,6 +679,7 @@ func TestDatabaseImplement_SelectServerTable_CDIComposedServer_Success(t *testin
 		Return([]interface{}{
 			map[string]interface{}{
 				"cots_server_id":        nil,
+				"system_id":             "system-cdi-001",
 				"cdi_compute_server_id": "cdi001",
 				"server_type":           float64(0), // CDI Composed Server
 				"status":                float64(1),
@@ -752,6 +748,7 @@ func TestDatabaseImplement_SelectServerTable_CDIComposedServer_Success(t *testin
 	// Verify CDI Composed Server details
 	cdiServer := targetList[0]
 	assert.Equal(t, "cdi001", cdiServer.ServerID)
+	assert.Equal(t, "system-cdi-001", cdiServer.SystemID)
 	assert.Equal(t, "192.168.2.100", cdiServer.IpmiAddress)
 	assert.Equal(t, "root", cdiServer.IpmiUser)
 	assert.Equal(t, "pass123", cdiServer.IpmiPassword)

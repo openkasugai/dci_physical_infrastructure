@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package api_ipranges
 
 import (
@@ -50,7 +36,7 @@ func (i *IPranges) POST(ctx context.Context, reqBody request_body.Reqbody) (resp
 
 	// execute API call to create an IP range
 	apiReqBody := fmt.Sprintf("subnet_id=%d&start_ip=%s&end_ip=%s&type=%s", req.SubnetID, req.StartIP, req.EndIP, req.Type)
-	statusCode, data, err := i.API.APIExecute(ctx, "POST", "ipranges/", apiReqBody)
+	statusCode, data, err := i.API.APIExecute(ctx, "POST", "ipranges/", apiReqBody, i.WithRetry)
 	if err != nil {
 		klog.V(2).InfoS("branch: IP range creation API execution failed", "error", err.Error())
 		return nil, err

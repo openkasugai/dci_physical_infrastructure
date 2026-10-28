@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package factory
 
 import (
@@ -19,9 +5,11 @@ import (
 
 	"common/models"
 	proto "maas_module/api/proto" // import of gRPC protobuf
+	"maas_module/internal/server/implementation/async_job"
 	"maas_module/internal/server/implementation/canonical_maas" // import MaaS implement
 	"maas_module/internal/server/implementation/canonical_maas/maas_api"
 	"maas_module/internal/server/interfaces" // import MaaS interface
+	"maas_module/internal/server/utils"
 )
 
 // CreateMaasController creates an instance of the Canonical MaaS controller.
@@ -43,8 +31,43 @@ func CreateMaasController(logger klog.Logger, productInfo *proto.ProductInformat
 		klog.V(2).InfoS("branch: creating Canonical-MaaS Ansible instance")
 		ansible := &canonical_maas.CanonicalMaasAnsibleImple{Logger: logger, Executor: executor} // instanse of MaaS Ansible
 
-		klog.InfoS("Canonical-MaaS controller components initialized successfully")
-		return &canonical_maas.CanonicalMaasController{Logger: logger, APIFactory: api, Ansible: ansible, JobManager: canonical_maas.NewInMemoryJobManager()}
+		config := utils.GetConfig()
+		workerImage := ""
+		serviceAccount := ""
+		sshSecretName := ""
+		tlsSecretName := ""
+		tlsEnabled := false
+		tlsCertPath := ""
+		backoffLimit := int32(0)
+		ttlSeconds := int32(600)
+		activeDeadline := int64(7200)
+		if config != nil {
+			workerImage = config.K8sJobWorkerImage
+			serviceAccount = config.K8sJobServiceAccount
+			sshSecretName = config.K8sJobSSHSecretName
+			tlsSecretName = config.K8sJobTLSSecretName
+			tlsEnabled = config.TlsEnable
+			tlsCertPath = config.TlsCertPath
+			backoffLimit = config.K8sJobBackoffLimit
+			ttlSeconds = config.K8sJobTTLSeconds
+			activeDeadline = config.K8sJobActiveDeadlineSecs
+		}
+		klog.V(2).InfoS("branch: creating K8sJobManager")
+		jobManager := async_job.NewK8sJobManager(logger, async_job.K8sJobStoreOptions{
+			Namespace:             "",
+			WorkerImage:           workerImage,
+			ServiceAccountName:    serviceAccount,
+			SshSecretName:         sshSecretName,
+			TlsSecretName:         tlsSecretName,
+			TlsEnabled:            tlsEnabled,
+			TlsCertPath:           tlsCertPath,
+			BackoffLimit:          backoffLimit,
+			TTLSecondsAfterFinish: ttlSeconds,
+			ActiveDeadlineSeconds: activeDeadline,
+		})
+
+		klog.V(2).InfoS("Canonical-MaaS controller components initialized successfully")
+		return &canonical_maas.CanonicalMaasController{Logger: logger, APIFactory: api, Ansible: ansible, JobManager: jobManager}
 	}
 
 	// unsupported product information

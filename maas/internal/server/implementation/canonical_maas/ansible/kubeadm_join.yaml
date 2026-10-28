@@ -24,9 +24,55 @@
         path: /etc/kubernetes/kubelet.conf
       register: kubelet_conf
 
-    - name: Execute kubeadm join
-      shell: "{{ join_command }}"
+    - name: Create kubeadm join config file
+      shell: |
+        readarray -t join_info < <(
+          echo "{{ join_command }}" | \
+          awk '{
+            for(i=1;i<=NF;i++){
+              if($i ~ /:6443/) ep=$i
+              if($i=="--token") token=$(i+1)
+              if($i ~ /^sha256:/) hash=$i
+            }
+          }
+          END{
+            print ep
+            print token
+            print hash
+          }'
+        )
+        
+        ep="${join_info[0]}"
+        token="${join_info[1]}"
+        hash="${join_info[2]}"
+        
+        cat > /tmp/kubeadm-join-{{ inventory_hostname }}.yaml <<EOF
+        apiVersion: kubeadm.k8s.io/v1beta4
+        kind: JoinConfiguration
+    
+        discovery:
+          bootstrapToken:
+            apiServerEndpoint: ${ep}
+            token: ${token}
+            caCertHashes:
+              - ${hash}
+    
+        nodeRegistration:
+          kubeletExtraArgs:
+          - name: "node-ip"
+            value: "{{ node_ip }}"
+        EOF
+      when: not kubelet_conf.stat.exists
+
+    - name: Execute kubeadm join with config
+      shell: kubeadm join --config /tmp/kubeadm-join-{{ inventory_hostname }}.yaml
       register: join_result
+      when: not kubelet_conf.stat.exists
+
+    - name: Remove kubeadm join config file
+      file:
+        path: /tmp/kubeadm-join-{{ inventory_hostname }}.yaml
+        state: absent
       when: not kubelet_conf.stat.exists
 
     - name: Display join result

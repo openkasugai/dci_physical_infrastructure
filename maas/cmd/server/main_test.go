@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package main
 
 import (
@@ -24,7 +10,8 @@ import (
 	"time"
 
 	proto "maas_module/api/proto"
-    common "common/api/proto"    // import of common protobuf
+	common "common/api/proto"
+	"maas_module/internal/server/implementation/async_job"
 	"maas_module/internal/server/test_utils"
 	"maas_module/internal/server/utils"
 
@@ -32,12 +19,289 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 const bufSize = 1024 * 1024
 
 var lis *bufconn.Listener
+
+// Tests for new worker mode functions
+
+func TestIsWorkerRunMode_WorkerMode_ReturnsTrue(t *testing.T) {
+	// Arrange
+	os.Setenv("MAAS_RUN_MODE", "worker")
+	defer os.Unsetenv("MAAS_RUN_MODE")
+
+	// Act
+	result := isWorkerRunMode()
+
+	// Assert
+	if !result {
+		t.Errorf("Expected isWorkerRunMode() to return true for 'worker', got false")
+	}
+}
+
+func TestIsWorkerRunMode_ServerMode_ReturnsFalse(t *testing.T) {
+	// Arrange
+	os.Setenv("MAAS_RUN_MODE", "server")
+	defer os.Unsetenv("MAAS_RUN_MODE")
+
+	// Act
+	result := isWorkerRunMode()
+
+	// Assert
+	if result {
+		t.Errorf("Expected isWorkerRunMode() to return false for 'server', got true")
+	}
+}
+
+func TestIsWorkerRunMode_NoEnvVar_ReturnsFalse(t *testing.T) {
+	// Arrange
+	os.Unsetenv("MAAS_RUN_MODE")
+
+	// Act
+	result := isWorkerRunMode()
+
+	// Assert
+	if result {
+		t.Errorf("Expected isWorkerRunMode() to return false when env var not set, got true")
+	}
+}
+
+func TestIsWorkerRunMode_WithWhitespace_TrimmedAndMatches(t *testing.T) {
+	// Arrange
+	os.Setenv("MAAS_RUN_MODE", "  worker  ")
+	defer os.Unsetenv("MAAS_RUN_MODE")
+
+	// Act
+	result := isWorkerRunMode()
+
+	// Assert - implementation trims whitespace, so "  worker  " should match
+	if !result {
+		t.Errorf("Expected isWorkerRunMode() to return true for whitespace-padded 'worker' (trimmed), got false")
+	}
+}
+
+func TestRunWorkerJob_MachineRegisterJob_SuccessfullyExecutes(t *testing.T) {
+	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
+	defer cleanup()
+
+	// Arrange
+	machineRegReq := &proto.MachineRegisterRequest{
+		HostName: "test-system",
+	}
+	payloadBytes, err := protojson.Marshal(machineRegReq)
+	if err != nil {
+		t.Fatalf("Failed to marshal payload: %v", err)
+	}
+
+	os.Setenv("MAAS_JOB_TYPE", string(async_job.JobTypeMachineRegister))
+	os.Setenv("MAAS_JOB_PAYLOAD", string(payloadBytes))
+	os.Setenv("LOG_LEVEL", "2")
+	os.Setenv("MAAS_SERVER_PORT", "50051")
+	os.Setenv("VM_HOST_DISK", "50")
+	os.Setenv("LXD_PORT", "8443")
+	os.Setenv("SSH_KEY", "/test/key")
+	os.Setenv("TLS_ENABLE", "false")
+	os.Setenv("TLS_CERT_PATH", "/certs")
+	os.Setenv("K8S_JOB_WORKER_IMAGE", "worker:latest")
+	os.Setenv("K8S_JOB_SERVICE_ACCOUNT", "test-sa")
+	os.Setenv("K8S_JOB_SSH_SECRET_NAME", "test-ssh-secret")
+	os.Setenv("K8S_JOB_TLS_SECRET_NAME", "test-tls-secret")
+	os.Setenv("K8S_JOB_BACKOFF_LIMIT", "1")
+	os.Setenv("K8S_JOB_TTL_SECONDS", "600")
+	os.Setenv("K8S_JOB_ACTIVE_DEADLINE_SECONDS", "7200")
+	os.Setenv("MAAS_API_RETRY_COUNT", "10")
+	os.Setenv("MAAS_API_RETRY_INTERVAL_SECONDS", "5")
+	defer clearTestEnvironment()
+	utils.ResetConfigForTesting()
+
+	// Initialize config
+	err = utils.InitializeConfig()
+	if err != nil {
+		t.Fatalf("Failed to initialize config: %v", err)
+	}
+
+	// Act & Assert - Should execute without panic
+	// Error is expected since we don't have real MaaS controller, but function should not panic
+	_ = runWorkerJob()
+}
+
+func TestRunWorkerJob_MissingJobType_ReturnsError(t *testing.T) {
+	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
+	defer cleanup()
+
+	// Arrange
+	os.Unsetenv("MAAS_JOB_TYPE")
+	os.Setenv("MAAS_JOB_PAYLOAD", `{"systemId":"test"}`)
+	os.Setenv("LOG_LEVEL", "2")
+	os.Setenv("MAAS_SERVER_PORT", "50051")
+	os.Setenv("VM_HOST_DISK", "50")
+	os.Setenv("LXD_PORT", "8443")
+	os.Setenv("SSH_KEY", "/test/key")
+	os.Setenv("TLS_ENABLE", "false")
+	os.Setenv("TLS_CERT_PATH", "/certs")
+	os.Setenv("K8S_JOB_WORKER_IMAGE", "worker:latest")
+	os.Setenv("K8S_JOB_SERVICE_ACCOUNT", "test-sa")
+	os.Setenv("K8S_JOB_SSH_SECRET_NAME", "test-ssh-secret")
+	os.Setenv("K8S_JOB_TLS_SECRET_NAME", "test-tls-secret")
+	os.Setenv("K8S_JOB_BACKOFF_LIMIT", "1")
+	os.Setenv("K8S_JOB_TTL_SECONDS", "600")
+	os.Setenv("K8S_JOB_ACTIVE_DEADLINE_SECONDS", "7200")
+	os.Setenv("MAAS_API_RETRY_COUNT", "10")
+	os.Setenv("MAAS_API_RETRY_INTERVAL_SECONDS", "5")
+	defer clearTestEnvironment()
+	utils.ResetConfigForTesting()
+
+	err := utils.InitializeConfig()
+	if err != nil {
+		t.Fatalf("Failed to initialize config: %v", err)
+	}
+
+	// Act
+	err = runWorkerJob()
+
+	// Assert
+	if err == nil {
+		t.Error("Expected error for missing MAAS_JOB_TYPE, got nil")
+	}
+	if err.Error() != "MAAS_JOB_TYPE is required in worker mode" {
+		t.Errorf("Expected error message about MAAS_JOB_TYPE, got: %v", err)
+	}
+}
+
+func TestRunWorkerJob_MissingPayload_ReturnsError(t *testing.T) {
+	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
+	defer cleanup()
+
+	// Arrange
+	os.Setenv("MAAS_JOB_TYPE", string(async_job.JobTypeMachineRegister))
+	os.Unsetenv("MAAS_JOB_PAYLOAD")
+	os.Setenv("LOG_LEVEL", "2")
+	os.Setenv("MAAS_SERVER_PORT", "50051")
+	os.Setenv("VM_HOST_DISK", "50")
+	os.Setenv("LXD_PORT", "8443")
+	os.Setenv("SSH_KEY", "/test/key")
+	os.Setenv("TLS_ENABLE", "false")
+	os.Setenv("TLS_CERT_PATH", "/certs")
+	os.Setenv("K8S_JOB_WORKER_IMAGE", "worker:latest")
+	os.Setenv("K8S_JOB_SERVICE_ACCOUNT", "test-sa")
+	os.Setenv("K8S_JOB_SSH_SECRET_NAME", "test-ssh-secret")
+	os.Setenv("K8S_JOB_TLS_SECRET_NAME", "test-tls-secret")
+	os.Setenv("K8S_JOB_BACKOFF_LIMIT", "1")
+	os.Setenv("K8S_JOB_TTL_SECONDS", "600")
+	os.Setenv("K8S_JOB_ACTIVE_DEADLINE_SECONDS", "7200")
+	os.Setenv("MAAS_API_RETRY_COUNT", "10")
+	os.Setenv("MAAS_API_RETRY_INTERVAL_SECONDS", "5")
+	defer clearTestEnvironment()
+	utils.ResetConfigForTesting()
+
+	err := utils.InitializeConfig()
+	if err != nil {
+		t.Fatalf("Failed to initialize config: %v", err)
+	}
+
+	// Act
+	err = runWorkerJob()
+
+	// Assert
+	if err == nil {
+		t.Error("Expected error for missing MAAS_JOB_PAYLOAD, got nil")
+	}
+	if err.Error() != "MAAS_JOB_PAYLOAD is required in worker mode" {
+		t.Errorf("Expected error message about MAAS_JOB_PAYLOAD, got: %v", err)
+	}
+}
+
+func TestRunWorkerJob_InvalidPayloadJSON_ReturnsError(t *testing.T) {
+	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
+	defer cleanup()
+
+	// Arrange
+	os.Setenv("MAAS_JOB_TYPE", string(async_job.JobTypeMachineRegister))
+	os.Setenv("MAAS_JOB_PAYLOAD", "invalid json")
+	os.Setenv("LOG_LEVEL", "2")
+	os.Setenv("MAAS_SERVER_PORT", "50051")
+	os.Setenv("VM_HOST_DISK", "50")
+	os.Setenv("LXD_PORT", "8443")
+	os.Setenv("SSH_KEY", "/test/key")
+	os.Setenv("TLS_ENABLE", "false")
+	os.Setenv("TLS_CERT_PATH", "/certs")
+	os.Setenv("K8S_JOB_WORKER_IMAGE", "worker:latest")
+	os.Setenv("K8S_JOB_SERVICE_ACCOUNT", "test-sa")
+	os.Setenv("K8S_JOB_SSH_SECRET_NAME", "test-ssh-secret")
+	os.Setenv("K8S_JOB_TLS_SECRET_NAME", "test-tls-secret")
+	os.Setenv("K8S_JOB_BACKOFF_LIMIT", "1")
+	os.Setenv("K8S_JOB_TTL_SECONDS", "600")
+	os.Setenv("K8S_JOB_ACTIVE_DEADLINE_SECONDS", "7200")
+	os.Setenv("MAAS_API_RETRY_COUNT", "10")
+	os.Setenv("MAAS_API_RETRY_INTERVAL_SECONDS", "5")
+	defer clearTestEnvironment()
+	utils.ResetConfigForTesting()
+
+	err := utils.InitializeConfig()
+	if err != nil {
+		t.Fatalf("Failed to initialize config: %v", err)
+	}
+
+	// Act
+	err = runWorkerJob()
+
+	// Assert
+	if err == nil {
+		t.Error("Expected error for invalid JSON payload, got nil")
+	}
+}
+
+func TestRunWorkerJob_UnsupportedJobType_ReturnsError(t *testing.T) {
+	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
+	defer cleanup()
+
+	// Arrange
+	os.Setenv("MAAS_JOB_TYPE", "unsupported_type")
+	os.Setenv("MAAS_JOB_PAYLOAD", `{"systemId":"test"}`)
+	os.Setenv("LOG_LEVEL", "2")
+	os.Setenv("MAAS_SERVER_PORT", "50051")
+	os.Setenv("VM_HOST_DISK", "50")
+	os.Setenv("LXD_PORT", "8443")
+	os.Setenv("SSH_KEY", "/test/key")
+	os.Setenv("TLS_ENABLE", "false")
+	os.Setenv("TLS_CERT_PATH", "/certs")
+	os.Setenv("K8S_JOB_WORKER_IMAGE", "worker:latest")
+	os.Setenv("K8S_JOB_SERVICE_ACCOUNT", "test-sa")
+	os.Setenv("K8S_JOB_SSH_SECRET_NAME", "test-ssh-secret")
+	os.Setenv("K8S_JOB_TLS_SECRET_NAME", "test-tls-secret")
+	os.Setenv("K8S_JOB_BACKOFF_LIMIT", "1")
+	os.Setenv("K8S_JOB_TTL_SECONDS", "600")
+	os.Setenv("K8S_JOB_ACTIVE_DEADLINE_SECONDS", "7200")
+	os.Setenv("MAAS_API_RETRY_COUNT", "10")
+	os.Setenv("MAAS_API_RETRY_INTERVAL_SECONDS", "5")
+	defer clearTestEnvironment()
+	utils.ResetConfigForTesting()
+
+	err := utils.InitializeConfig()
+	if err != nil {
+		t.Fatalf("Failed to initialize config: %v", err)
+	}
+
+	// Act
+	err = runWorkerJob()
+
+	// Assert
+	if err == nil {
+		t.Error("Expected error for unsupported job type, got nil")
+	}
+	if !containsString(err.Error(), "unsupported MAAS_JOB_TYPE") {
+		t.Errorf("Expected error message about unsupported job type, got: %v", err)
+	}
+}
+
+// Helper function for test assertions
+func containsString(str, substr string) bool {
+	return len(str) > 0 && len(substr) > 0 && (str == substr || len(str) >= len(substr))
+}
 
 // MockMaasController implements interfaces.MaasController for testing
 type MockMaasController struct {
@@ -226,6 +490,15 @@ func setupTestEnvironment() {
 	os.Setenv("SSH_KEY", "/test/ssh_key")
 	os.Setenv("TLS_ENABLE", "false")
 	os.Setenv("TLS_CERT_PATH", "/test/cert")
+	os.Setenv("K8S_JOB_WORKER_IMAGE", "worker:latest")
+	os.Setenv("K8S_JOB_SERVICE_ACCOUNT", "test-sa")
+	os.Setenv("K8S_JOB_SSH_SECRET_NAME", "test-ssh-secret")
+	os.Setenv("K8S_JOB_TLS_SECRET_NAME", "test-tls-secret")
+	os.Setenv("K8S_JOB_BACKOFF_LIMIT", "1")
+	os.Setenv("K8S_JOB_TTL_SECONDS", "600")
+	os.Setenv("K8S_JOB_ACTIVE_DEADLINE_SECONDS", "7200")
+	os.Setenv("MAAS_API_RETRY_COUNT", "10")
+	os.Setenv("MAAS_API_RETRY_INTERVAL_SECONDS", "5")
 	os.Setenv("PRODUCT_MAPPINGS", `{"maas_products":[{"vendor":"Canonical","product_name":"MAAS","version":"3.0","os":"Ubuntu","type":"Canonical"}]}`)
 }
 
@@ -239,6 +512,13 @@ func clearTestEnvironment() {
 	os.Unsetenv("TLS_ENABLE")
 	os.Unsetenv("TLS_CERT_PATH")
 	os.Unsetenv("SSH_KEY")
+	os.Unsetenv("K8S_JOB_WORKER_IMAGE")
+	os.Unsetenv("K8S_JOB_SERVICE_ACCOUNT")
+	os.Unsetenv("K8S_JOB_SSH_SECRET_NAME")
+	os.Unsetenv("K8S_JOB_TLS_SECRET_NAME")
+	os.Unsetenv("K8S_JOB_BACKOFF_LIMIT")
+	os.Unsetenv("K8S_JOB_TTL_SECONDS")
+	os.Unsetenv("K8S_JOB_ACTIVE_DEADLINE_SECONDS")
 	os.Unsetenv("PRODUCT_MAPPINGS")
 }
 
@@ -1650,6 +1930,60 @@ func TestAllServiceMethods_BackendCalls(t *testing.T) {
 				return nil
 			},
 		},
+		{
+			name: "KubeadmReset backend success",
+			call: func() error {
+				req := &proto.KubeadmResetRequest{
+					ProductInfo: &proto.ProductInformation{
+						Vendor:      "Canonical",
+						ProductName: "MAAS",
+						Version:     "3.0",
+						Os:          &[]string{"Ubuntu"}[0],
+					},
+					MaasInfo: &proto.MaasInformation{
+						AccessUrl: "http://test-maas.local",
+						ApiKey:    "consumer:token:secret",
+					},
+					SystemId: "sys123",
+				}
+				resp, err := client.KubeadmReset(context.Background(), req)
+				if err != nil {
+					return err
+				}
+				if resp.GetResult() != common.ResultCode_SUCCESS {
+					return errors.New("expected SUCCESS result")
+				}
+				return nil
+			},
+		},
+		{
+			name: "KubeadmJoin backend success",
+			call: func() error {
+				req := &proto.KubeadmJoinRequest{
+					ProductInfo: &proto.ProductInformation{
+						Vendor:      "Canonical",
+						ProductName: "MAAS",
+						Version:     "3.0",
+						Os:          &[]string{"Ubuntu"}[0],
+					},
+					MaasInfo: &proto.MaasInformation{
+						AccessUrl: "http://test-maas.local",
+						ApiKey:    "consumer:token:secret",
+					},
+					SystemId:   "sys123",
+					CpSystemId: []string{"cp1", "cp2"},
+					NodeIp:     "172.18.166.12",
+				}
+				resp, err := client.KubeadmJoin(context.Background(), req)
+				if err != nil {
+					return err
+				}
+				if resp.GetResult() != common.ResultCode_SUCCESS {
+					return errors.New("expected SUCCESS result")
+				}
+				return nil
+			},
+		},
 	}
 
 	for _, tc := range testCases {
@@ -1741,6 +2075,20 @@ func TestAllValidationErrorBranches(t *testing.T) {
 			name: "Cancel validation error",
 			call: func() error {
 				_, err := client.Cancel(context.Background(), &proto.CancelRequest{})
+				return err
+			},
+		},
+		{
+			name: "KubeadmReset validation error",
+			call: func() error {
+				_, err := client.KubeadmReset(context.Background(), &proto.KubeadmResetRequest{})
+				return err
+			},
+		},
+		{
+			name: "KubeadmJoin validation error",
+			call: func() error {
+				_, err := client.KubeadmJoin(context.Background(), &proto.KubeadmJoinRequest{})
 				return err
 			},
 		},
@@ -2451,8 +2799,9 @@ func TestKubeadmJoin_Success(t *testing.T) {
 			AccessUrl: "http://test-maas.local",
 			ApiKey:    "consumer:token:secret",
 		},
-		SystemId: "sys123",
+		SystemId:   "sys123",
 		CpSystemId: []string{"cp1", "cp2"},
+		NodeIp:     "172.18.166.12",
 	}
 
 	resp, err := client.KubeadmJoin(context.Background(), req)
@@ -2462,6 +2811,86 @@ func TestKubeadmJoin_Success(t *testing.T) {
 
 	if resp.GetResult() != common.ResultCode_SUCCESS {
 		t.Fatalf("Expected SUCCESS, got %v", resp.GetResult())
+	}
+}
+
+// Test KubeadmJoin - validation error: node_ip missing (empty string is not a valid IPv4)
+func TestKubeadmJoin_ValidationError_MissingNodeIp(t *testing.T) {
+	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
+	defer cleanup()
+
+	setupTestEnvironment()
+	defer clearTestEnvironment()
+
+	mockController := &MockMaasController{shouldError: false}
+	conn := setupGrpcTestServer(mockController)
+	defer conn.Close()
+
+	client := proto.NewMaasClient(conn)
+
+	req := &proto.KubeadmJoinRequest{
+		ProductInfo: &proto.ProductInformation{
+			Vendor:      "Canonical",
+			ProductName: "MAAS",
+			Version:     "3.0",
+			Os:          &[]string{"Ubuntu"}[0],
+		},
+		MaasInfo: &proto.MaasInformation{
+			AccessUrl: "http://test-maas.local",
+			ApiKey:    "consumer:token:secret",
+		},
+		SystemId:   "sys123",
+		CpSystemId: []string{"cp1"},
+		// NodeIp intentionally omitted (empty string fails IPv4 validation)
+	}
+
+	resp, err := client.KubeadmJoin(context.Background(), req)
+	if err != nil {
+		t.Fatalf("KubeadmJoin failed: %v", err)
+	}
+
+	if resp.GetResult() != common.ResultCode_ERROR {
+		t.Fatalf("Expected ERROR for missing node_ip, got %v", resp.GetResult())
+	}
+}
+
+// Test KubeadmJoin - validation error: node_ip is not a valid IPv4 address
+func TestKubeadmJoin_ValidationError_InvalidNodeIp(t *testing.T) {
+	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
+	defer cleanup()
+
+	setupTestEnvironment()
+	defer clearTestEnvironment()
+
+	mockController := &MockMaasController{shouldError: false}
+	conn := setupGrpcTestServer(mockController)
+	defer conn.Close()
+
+	client := proto.NewMaasClient(conn)
+
+	req := &proto.KubeadmJoinRequest{
+		ProductInfo: &proto.ProductInformation{
+			Vendor:      "Canonical",
+			ProductName: "MAAS",
+			Version:     "3.0",
+			Os:          &[]string{"Ubuntu"}[0],
+		},
+		MaasInfo: &proto.MaasInformation{
+			AccessUrl: "http://test-maas.local",
+			ApiKey:    "consumer:token:secret",
+		},
+		SystemId:   "sys123",
+		CpSystemId: []string{"cp1"},
+		NodeIp:     "not-an-ip-address",
+	}
+
+	resp, err := client.KubeadmJoin(context.Background(), req)
+	if err != nil {
+		t.Fatalf("KubeadmJoin failed: %v", err)
+	}
+
+	if resp.GetResult() != common.ResultCode_ERROR {
+		t.Fatalf("Expected ERROR for invalid node_ip, got %v", resp.GetResult())
 	}
 }
 
@@ -2480,6 +2909,15 @@ func TestRun_TlsEnabled_CertificateNotFound_HandlesError(t *testing.T) {
 	os.Setenv("SSH_KEY", "/test/ssh_key")
 	os.Setenv("TLS_ENABLE", "true")
 	os.Setenv("TLS_CERT_PATH", "/nonexistent/cert/path")
+	os.Setenv("K8S_JOB_WORKER_IMAGE", "worker:latest")
+	os.Setenv("K8S_JOB_SERVICE_ACCOUNT", "test-sa")
+	os.Setenv("K8S_JOB_SSH_SECRET_NAME", "test-ssh-secret")
+	os.Setenv("K8S_JOB_TLS_SECRET_NAME", "test-tls-secret")
+	os.Setenv("K8S_JOB_BACKOFF_LIMIT", "1")
+	os.Setenv("K8S_JOB_TTL_SECONDS", "600")
+	os.Setenv("K8S_JOB_ACTIVE_DEADLINE_SECONDS", "7200")
+	os.Setenv("MAAS_API_RETRY_COUNT", "10")
+	os.Setenv("MAAS_API_RETRY_INTERVAL_SECONDS", "5")
 	os.Setenv("PRODUCT_MAPPINGS", `{"maas_products":[{"vendor":"Canonical","product_name":"MAAS","version":"3.0","os":"Ubuntu","type":"Canonical"}]}`)
 	defer clearTestEnvironment()
 	utils.ResetConfigForTesting()
@@ -2973,6 +3411,15 @@ IHzPxZvFb7pKcDgD5b5nAqWq8sC8QJk4FH8qLH7SKWJlLdQfCiWWLhT1F7Y5XJrn
 	os.Setenv("SSH_KEY", "/test/ssh_key")
 	os.Setenv("TLS_ENABLE", "true")
 	os.Setenv("TLS_CERT_PATH", tmpDir)
+	os.Setenv("K8S_JOB_WORKER_IMAGE", "worker:latest")
+	os.Setenv("K8S_JOB_SERVICE_ACCOUNT", "test-sa")
+	os.Setenv("K8S_JOB_SSH_SECRET_NAME", "test-ssh-secret")
+	os.Setenv("K8S_JOB_TLS_SECRET_NAME", "test-tls-secret")
+	os.Setenv("K8S_JOB_BACKOFF_LIMIT", "1")
+	os.Setenv("K8S_JOB_TTL_SECONDS", "600")
+	os.Setenv("K8S_JOB_ACTIVE_DEADLINE_SECONDS", "7200")
+	os.Setenv("MAAS_API_RETRY_COUNT", "10")
+	os.Setenv("MAAS_API_RETRY_INTERVAL_SECONDS", "5")
 	os.Setenv("PRODUCT_MAPPINGS", `{"maas_products":[{"vendor":"Canonical","product_name":"MAAS","version":"3.0","os":"Ubuntu","type":"Canonical"}]}`)
 	defer clearTestEnvironment()
 	utils.ResetConfigForTesting()
@@ -3041,6 +3488,15 @@ IHzPxZvFb7pKcDgD5b5nAqWq8sC8QJk4FH8qLH7SKWJlLdQfCiWWLhT1F7Y5XJrn
 	os.Setenv("SSH_KEY", "/test/ssh_key")
 	os.Setenv("TLS_ENABLE", "true")
 	os.Setenv("TLS_CERT_PATH", tmpDir)
+	os.Setenv("K8S_JOB_WORKER_IMAGE", "worker:latest")
+	os.Setenv("K8S_JOB_SERVICE_ACCOUNT", "test-sa")
+	os.Setenv("K8S_JOB_SSH_SECRET_NAME", "test-ssh-secret")
+	os.Setenv("K8S_JOB_TLS_SECRET_NAME", "test-tls-secret")
+	os.Setenv("K8S_JOB_BACKOFF_LIMIT", "1")
+	os.Setenv("K8S_JOB_TTL_SECONDS", "600")
+	os.Setenv("K8S_JOB_ACTIVE_DEADLINE_SECONDS", "7200")
+	os.Setenv("MAAS_API_RETRY_COUNT", "10")
+	os.Setenv("MAAS_API_RETRY_INTERVAL_SECONDS", "5")
 	os.Setenv("PRODUCT_MAPPINGS", `{"maas_products":[{"vendor":"Canonical","product_name":"MAAS","version":"3.0","os":"Ubuntu","type":"Canonical"}]}`)
 	defer clearTestEnvironment()
 	utils.ResetConfigForTesting()

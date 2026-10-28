@@ -3,9 +3,9 @@
 
   tasks:
     - name: helth check cmd
-      shell: "./hhchk -F '{{ cdi_pass }}' -D '{{ director_pass}}'"
+      shell: "/opt/epc/bin/hhchk -F '{{ cdi_pass }}' -D '{{ director_pass}}'"
       args:
-        chdir: /opt/epc/bin
+        chdir: /home/cdiadmin
       register: hhchk_result
 
     - name: result output

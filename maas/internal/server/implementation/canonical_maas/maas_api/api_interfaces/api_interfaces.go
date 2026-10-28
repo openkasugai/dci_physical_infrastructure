@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package api_interfaces
 
 import (
@@ -40,7 +26,7 @@ func (i *Interfaces) GET(ctx context.Context) (response_body.Resbody, error) {
 	}()
 
 	// execute API call to get interfaces
-	statusCode, data, err := i.API.APIExecute(ctx, "GET", fmt.Sprintf(`nodes/%s/interfaces/`, i.SystemID), "")
+	statusCode, data, err := i.API.APIExecute(ctx, "GET", fmt.Sprintf(`nodes/%s/interfaces/`, i.SystemID), "", i.WithRetry)
 	if err != nil {
 		klog.V(2).InfoS("branch: interfaces API execution failed", "error", err.Error())
 		return nil, err
@@ -92,7 +78,7 @@ func (i *InterfaceLinkSubnet) POST(ctx context.Context, reqBody request_body.Req
 
 	// execute API call to link subnet
 	apiReqBody := fmt.Sprintf("mode=%s&subnet=%d", req.Mode, req.SubnetID)
-	statusCode, data, err := i.API.APIExecute(ctx, "POST", fmt.Sprintf(`nodes/%s/interfaces/%d/op-link_subnet`, i.SystemID, i.InterfaceID), apiReqBody)
+	statusCode, data, err := i.API.APIExecute(ctx, "POST", fmt.Sprintf(`nodes/%s/interfaces/%d/op-link_subnet`, i.SystemID, i.InterfaceID), apiReqBody, i.WithRetry)
 	if err != nil {
 		klog.V(2).InfoS("branch: link subnet API execution failed", "error", err.Error())
 		return nil, err
@@ -119,7 +105,7 @@ func (i *InterfaceDisconnect) POST(ctx context.Context, reqBody request_body.Req
 	}()
 
 	// execute API call to disconnect interface
-	statusCode, data, err := i.API.APIExecute(ctx, "POST", fmt.Sprintf(`nodes/%s/interfaces/%d/op-disconnect`, i.SystemID, i.InterfaceID), "")
+	statusCode, data, err := i.API.APIExecute(ctx, "POST", fmt.Sprintf(`nodes/%s/interfaces/%d/op-disconnect`, i.SystemID, i.InterfaceID), "", i.WithRetry)
 	if err != nil {
 		klog.V(2).InfoS("branch: disconnect interface API execution failed", "error", err.Error())
 		return nil, err
@@ -158,7 +144,7 @@ func (i *InterfaceAddTag) POST(ctx context.Context, reqBody request_body.Reqbody
 
 	// execute API call to add tag
 	apiReqBody := fmt.Sprintf("tag=%s", req.Tag)
-	statusCode, data, err := i.API.APIExecute(ctx, "POST", fmt.Sprintf(`nodes/%s/interfaces/%d/op-add_tag`, i.SystemID, i.InterfaceID), apiReqBody)
+	statusCode, data, err := i.API.APIExecute(ctx, "POST", fmt.Sprintf(`nodes/%s/interfaces/%d/op-add_tag`, i.SystemID, i.InterfaceID), apiReqBody, i.WithRetry)
 	if err != nil {
 		klog.V(2).InfoS("branch: add tag API execution failed", "error", err.Error())
 		return nil, err
@@ -197,7 +183,7 @@ func (i *InterfaceRemoveTag) POST(ctx context.Context, reqBody request_body.Reqb
 
 	// execute API call to remove tag
 	apiReqBody := fmt.Sprintf("tag=%s", req.Tag)
-	statusCode, data, err := i.API.APIExecute(ctx, "POST", fmt.Sprintf(`nodes/%s/interfaces/%d/op-remove_tag`, i.SystemID, i.InterfaceID), apiReqBody)
+	statusCode, data, err := i.API.APIExecute(ctx, "POST", fmt.Sprintf(`nodes/%s/interfaces/%d/op-remove_tag`, i.SystemID, i.InterfaceID), apiReqBody, i.WithRetry)
 	if err != nil {
 		klog.V(2).InfoS("branch: remove tag API execution failed", "error", err.Error())
 		return nil, err
@@ -236,7 +222,7 @@ func (i *InterfaceUpdate) PUT(ctx context.Context, reqBody request_body.Reqbody)
 
 	// execute API call to update interface name
 	apiReqBody := fmt.Sprintf("name=%s", req.Name)
-	statusCode, data, err := i.API.APIExecute(ctx, "PUT", fmt.Sprintf(`nodes/%s/interfaces/%d/`, i.SystemID, i.InterfaceID), apiReqBody)
+	statusCode, data, err := i.API.APIExecute(ctx, "PUT", fmt.Sprintf(`nodes/%s/interfaces/%d/`, i.SystemID, i.InterfaceID), apiReqBody, i.WithRetry)
 	if err != nil {
 		klog.V(2).InfoS("branch: update interface API execution failed", "error", err.Error())
 		return nil, err

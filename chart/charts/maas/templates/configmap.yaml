@@ -11,3 +11,12 @@ data:
   SSH_KEY: {{ .Values.config.sshPrivateKeyPath | quote }}
   TLS_ENABLE: {{ .Values.tls.enabled | quote }}
   TLS_CERT_PATH: {{ .Values.tls.certPath | quote }}
+  K8S_JOB_WORKER_IMAGE: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+  K8S_JOB_SERVICE_ACCOUNT: {{ printf "%s-sa" (include "mychart.childName" (dict "Release" .Release "childChartName" "maas")) | quote }}
+  K8S_JOB_SSH_SECRET_NAME: {{ .Values.ssh.secretName | quote }}
+  K8S_JOB_TLS_SECRET_NAME: {{ .Values.tls.secretName | quote }}
+  K8S_JOB_BACKOFF_LIMIT: "0"
+  K8S_JOB_TTL_SECONDS: "600"
+  K8S_JOB_ACTIVE_DEADLINE_SECONDS: "7200"
+  MAAS_API_RETRY_COUNT: {{ .Values.config.maasApiRetryCount | quote }}
+  MAAS_API_RETRY_INTERVAL_SECONDS: {{ .Values.config.maasApiRetryIntervalSeconds | quote }}

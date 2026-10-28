@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package test_utils
 
 import (
@@ -52,19 +38,42 @@ func InitKlogForTest(t *testing.T) {
 
 // SetupTestEnvironmentWithKlog sets up test environment with klog initialization
 func SetupTestEnvironmentWithKlog(t *testing.T) func() {
-	// Set environment variables
-	originalLogLevel := os.Getenv("LOG_LEVEL")
-	os.Setenv("LOG_LEVEL", "2")
+	// Set default environment variables
+	originalEnvVars := make(map[string]string)
+	defaultEnvVars := map[string]string{
+		"LOG_LEVEL":                         "2",
+		"MAAS_SERVER_PORT":                  "50051",
+		"VM_HOST_DISK":                      "50",
+		"LXD_PORT":                          "8443",
+		"SSH_KEY":                           "/test/ssh_key",
+		"TLS_ENABLE":                        "false",
+		"TLS_CERT_PATH":                     "/test/cert",
+		"K8S_JOB_WORKER_IMAGE":              "worker:latest",
+		"K8S_JOB_SERVICE_ACCOUNT":           "test-sa",
+		"K8S_JOB_SSH_SECRET_NAME":           "test-ssh-secret",
+		"K8S_JOB_TLS_SECRET_NAME":           "test-tls-secret",
+		"K8S_JOB_BACKOFF_LIMIT":             "1",
+		"K8S_JOB_TTL_SECONDS":               "600",
+		"K8S_JOB_ACTIVE_DEADLINE_SECONDS":   "7200",
+	}
+
+	// Save original values and set defaults
+	for key, defaultValue := range defaultEnvVars {
+		originalEnvVars[key] = os.Getenv(key)
+		os.Setenv(key, defaultValue)
+	}
 
 	// Initialize klog
 	InitKlogForTest(t)
 
 	// Return cleanup function
 	return func() {
-		if originalLogLevel != "" {
-			os.Setenv("LOG_LEVEL", originalLogLevel)
-		} else {
-			os.Unsetenv("LOG_LEVEL")
+		for key, originalValue := range originalEnvVars {
+			if originalValue != "" {
+				os.Setenv(key, originalValue)
+			} else {
+				os.Unsetenv(key)
+			}
 		}
 		klog.Flush()
 	}

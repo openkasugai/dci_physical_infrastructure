@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package pg_cdi
 
 import (
@@ -1831,8 +1817,8 @@ func TestCardScaling_WithDelay(t *testing.T) {
 		t.Fatal("reply is nil")
 	}
 
-	// Wait for goroutine to execute including polling (1 poll cycle = ~1s)
-	time.Sleep(1500 * time.Millisecond)
+	// Wait for goroutine to execute including polling (1 poll cycle = ~3s)
+	time.Sleep(3500 * time.Millisecond)
 }
 
 // TestExtractResourceNames_Success tests successful resource name extraction
@@ -2665,8 +2651,8 @@ func TestPgCDIController_CardScaling_AddAndRemoveOperations_ExecutesBoth(t *test
 		t.Errorf("Expected ACCEPT, got %v", reply.GetResult())
 	}
 
-	// Wait for goroutine including 2 polling cycles (add poll + remove poll, ~1s each)
-	time.Sleep(3000 * time.Millisecond)
+	// Wait for goroutine including 2 polling cycles (add poll + remove poll, ~3s each)
+	time.Sleep(7000 * time.Millisecond)
 
 	// Verify both operations were called
 	if !addCalled {
@@ -2929,8 +2915,8 @@ func TestPgCDIController_CardScaling_AddOperationPollingErrorStatus_AbortsBefore
 		t.Errorf("Expected ACCEPT, got %v", reply.GetResult())
 	}
 
-	// Wait for goroutine: add(~0ms) + poll(~1s, returns ERROR) → abort
-	time.Sleep(1500 * time.Millisecond)
+	// Wait for goroutine: add(~0ms) + poll(~3s, returns ERROR) → abort
+	time.Sleep(3500 * time.Millisecond)
 
 	// Remove must NOT be executed when add polling returns ERROR
 	if removeCalled {
@@ -3023,6 +3009,6 @@ func TestPgCDIController_CardScaling_RemoveOperationPollingErrorStatus_LogsError
 		t.Errorf("Expected ACCEPT, got %v", reply.GetResult())
 	}
 
-	// Wait for goroutine: remove(~0ms) + poll(~1s, returns ERROR) → log error and abort
-	time.Sleep(1500 * time.Millisecond)
+	// Wait for goroutine: remove(~0ms) + poll(~3s, returns ERROR) → log error and abort
+	time.Sleep(3500 * time.Millisecond)
 }

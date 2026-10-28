@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package api_machines
 
 import (
@@ -37,7 +23,7 @@ type MockCanonicalMaasApi struct {
 	APIExecuteFunc func(ctx context.Context, method, endpoint, body string) (int, []byte, error)
 }
 
-func (m *MockCanonicalMaasApi) APIExecute(ctx context.Context, method, endpoint, body string) (int, []byte, error) {
+func (m *MockCanonicalMaasApi) APIExecute(ctx context.Context, method, endpoint, body string, withRetry bool) (int, []byte, error) {
 	// If custom function is provided, use it
 	if m.APIExecuteFunc != nil {
 		return m.APIExecuteFunc(ctx, method, endpoint, body)
@@ -1353,7 +1339,7 @@ type MockCanonicalMaasApiWithDoubleCall struct {
 	PostData       []byte
 }
 
-func (m *MockCanonicalMaasApiWithDoubleCall) APIExecute(ctx context.Context, method, endpoint, body string) (int, []byte, error) {
+func (m *MockCanonicalMaasApiWithDoubleCall) APIExecute(ctx context.Context, method, endpoint, body string, withRetry bool) (int, []byte, error) {
 	m.CallCount++
 
 	if method == "GET" {
@@ -2447,7 +2433,7 @@ type MockCanonicalMaasApiWithCallTracking struct {
 	PostStatusCode int
 }
 
-func (m *MockCanonicalMaasApiWithCallTracking) APIExecute(ctx context.Context, method, endpoint, body string) (int, []byte, error) {
+func (m *MockCanonicalMaasApiWithCallTracking) APIExecute(ctx context.Context, method, endpoint, body string, withRetry bool) (int, []byte, error) {
 	m.CallCount++
 
 	if method == "GET" {
@@ -2493,7 +2479,7 @@ type MockCanonicalMaasApiWithWrongType struct {
 	WrongData   []byte
 }
 
-func (m *MockCanonicalMaasApiWithWrongType) APIExecute(ctx context.Context, method, endpoint, body string) (int, []byte, error) {
+func (m *MockCanonicalMaasApiWithWrongType) APIExecute(ctx context.Context, method, endpoint, body string, withRetry bool) (int, []byte, error) {
 	if method == "GET" && m.GetSucceeds {
 		return 200, m.WrongData, nil
 	}
@@ -2506,7 +2492,7 @@ type MockCanonicalMaasApiWithPostFailure struct {
 	PostError error
 }
 
-func (m *MockCanonicalMaasApiWithPostFailure) APIExecute(ctx context.Context, method, endpoint, body string) (int, []byte, error) {
+func (m *MockCanonicalMaasApiWithPostFailure) APIExecute(ctx context.Context, method, endpoint, body string, withRetry bool) (int, []byte, error) {
 	if method == "GET" {
 		return 200, m.GetData, nil
 	} else if method == "POST" {
@@ -2518,7 +2504,7 @@ func (m *MockCanonicalMaasApiWithPostFailure) APIExecute(ctx context.Context, me
 // Mock that forces type assertion failure
 type MockCanonicalMaasApiForTypeAssertionFailure struct{}
 
-func (m *MockCanonicalMaasApiForTypeAssertionFailure) APIExecute(ctx context.Context, method, endpoint, body string) (int, []byte, error) {
+func (m *MockCanonicalMaasApiForTypeAssertionFailure) APIExecute(ctx context.Context, method, endpoint, body string, withRetry bool) (int, []byte, error) {
 	return 200, []byte(`[]`), nil
 }
 

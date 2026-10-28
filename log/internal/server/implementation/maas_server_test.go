@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package implementation
 
 import (
@@ -37,11 +23,11 @@ func TestMaaSImplement_Init_Success(t *testing.T) {
 	defer ctrl.Finish()
 
 	// Setup environment variables
-	defer setEnvMaaS("MAAS_LOGFILE", "maas.log")()
-	defer setEnvMaaS("MAAS_LOGPATH", "/var/log/maas")()
-	defer setEnvMaaS("MAAS_MAXSIZE", "100")()
-	defer setEnvMaaS("MAAS_MAXBACKUPS", "5")()
-	defer setEnvMaaS("MAAS_MAXAGE", "7")()
+	defer setEnvMaaS("MAASSERVER_LOGFILE", "maas.log")()
+	defer setEnvMaaS("MAASSERVER_LOGPATH", "/var/log/maas")()
+	defer setEnvMaaS("MAASSERVER_MAXSIZE", "100")()
+	defer setEnvMaaS("MAASSERVER_MAXBACKUPS", "5")()
+	defer setEnvMaaS("MAASSERVER_MAXAGE", "7")()
 
 	// Create mock Logging
 	mockLogging := mocks.NewMockLogging(ctrl)
@@ -77,11 +63,11 @@ func TestMaaSImplement_Init_LoggingInitError_ReturnsError(t *testing.T) {
 	defer ctrl.Finish()
 
 	// Setup environment variables
-	defer setEnvMaaS("MAAS_LOGFILE", "maas.log")()
-	defer setEnvMaaS("MAAS_LOGPATH", "/invalid/path")()
-	defer setEnvMaaS("MAAS_MAXSIZE", "100")()
-	defer setEnvMaaS("MAAS_MAXBACKUPS", "5")()
-	defer setEnvMaaS("MAAS_MAXAGE", "7")()
+	defer setEnvMaaS("MAASSERVER_LOGFILE", "maas.log")()
+	defer setEnvMaaS("MAASSERVER_LOGPATH", "/invalid/path")()
+	defer setEnvMaaS("MAASSERVER_MAXSIZE", "100")()
+	defer setEnvMaaS("MAASSERVER_MAXBACKUPS", "5")()
+	defer setEnvMaaS("MAASSERVER_MAXAGE", "7")()
 
 	// Create mock Logging that returns error
 	mockLogging := mocks.NewMockLogging(ctrl)
@@ -143,7 +129,7 @@ func TestMaaSImplement_Collection_CanonicalMaaS_Success(t *testing.T) {
 
 	// Setup expectations
 	mockAPI.EXPECT().
-		APIExecuteJWTAUth(
+		APIExecuteOAuth(
 			gomock.Any(),
 			"GET",
 			"http://maas1.example.com",
@@ -195,7 +181,7 @@ func TestMaaSImplement_Collection_APIError_WritesNG(t *testing.T) {
 
 	// API fails
 	mockAPI.EXPECT().
-		APIExecuteJWTAUth(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		APIExecuteOAuth(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(nil, errors.New("API execution failed"))
 
 	// Should write NG status
@@ -241,7 +227,7 @@ func TestMaaSImplement_Collection_LoggingWriteError_ContinuesProcessing(t *testi
 
 	// API succeeds
 	mockAPI.EXPECT().
-		APIExecuteJWTAUth(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		APIExecuteOAuth(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(nil, nil)
 
 	// Logging write fails
@@ -348,7 +334,7 @@ func TestMaaSImplement_Collection_MultipleTargets_ProcessesAll(t *testing.T) {
 
 	// First target
 	mockAPI.EXPECT().
-		APIExecuteJWTAUth(gomock.Any(), gomock.Any(), "http://maas1.example.com", gomock.Any(), gomock.Any(), gomock.Any()).
+		APIExecuteOAuth(gomock.Any(), gomock.Any(), "http://maas1.example.com", gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(nil, nil)
 	mockLogging.EXPECT().
 		Write("http://maas1.example.com", "{\"Health\":\"OK\"}").
@@ -356,7 +342,7 @@ func TestMaaSImplement_Collection_MultipleTargets_ProcessesAll(t *testing.T) {
 
 	// Second target
 	mockAPI.EXPECT().
-		APIExecuteJWTAUth(gomock.Any(), gomock.Any(), "http://maas2.example.com", gomock.Any(), gomock.Any(), gomock.Any()).
+		APIExecuteOAuth(gomock.Any(), gomock.Any(), "http://maas2.example.com", gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(nil, nil)
 	mockLogging.EXPECT().
 		Write("http://maas2.example.com", "{\"Health\":\"OK\"}").

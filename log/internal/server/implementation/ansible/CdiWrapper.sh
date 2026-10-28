@@ -49,6 +49,9 @@ do
   cmdline+="$N "
 done
 
+LOCK_WAIT_TIMEOUT=90
+LOCK_BASE_DIR="/tmp/cdi-wrapper-locks"
+
 # judge for CDI v1.0 or v1.1 
 if [ -e $CDIv1_1 ]; then
     # configure for login
@@ -80,8 +83,37 @@ else
 fi
 
 # login and execution
+mkdir -p "$LOCK_BASE_DIR"
+lock_key=$(printf '%s__%s' "$login_user" "$cdi_guest" | sed 's/[^A-Za-z0-9_.-]/_/g')
+lock_file="$LOCK_BASE_DIR/cdi-login-${lock_key}.lock"
+
+if ! command -v flock >/dev/null 2>&1; then
+    if [ -e $CDIv1_1 ]; then
+        echo "RESULT_TYPE:ERROR_V_1_1"
+    else
+        echo "RESULT_TYPE:ERROR_V_1_0"
+    fi
+    echo "flock command is not available."
+    exit 1
+fi
+
 cd $login_path
-output=$(expect -c "
+exec 200>"$lock_file"
+if ! flock -w "$LOCK_WAIT_TIMEOUT" 200; then
+    if [ -e $CDIv1_1 ]; then
+        echo "RESULT_TYPE:ERROR_V_1_1"
+    else
+        echo "RESULT_TYPE:ERROR_V_1_0"
+    fi
+    echo "CDI login lock acquisition timed out."
+    exit 1
+fi
+trap 'flock -u 200; exec 200>&-' EXIT INT TERM
+
+MAX_RETRY=3
+RETRY_INTERVAL=5
+for attempt in $(seq 1 $MAX_RETRY); do
+    output=$(expect -c "
 set timeout 60
 spawn $login
 expect \"$login_user_expect\"
@@ -92,7 +124,16 @@ expect \"cdi:\"
 send \"$cmdline\n\"
 expect \"cdi:\"
 ")
-expect_exit_code=$?
+    expect_exit_code=$?
+
+    if [ $expect_exit_code -eq 0 ] && echo "$output" | grep -q "cdi:[[:space:]]*$"; then
+        break
+    fi
+
+    if [ $attempt -lt $MAX_RETRY ]; then
+        sleep $RETRY_INTERVAL
+    fi
+done
 
 # Handle expect command errors before parsing
 if [ $expect_exit_code -ne 0 ] || ! echo "$output" | grep -q "cdi:[[:space:]]*$"; then

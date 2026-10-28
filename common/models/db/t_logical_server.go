@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package db
 
 import (
@@ -23,6 +9,7 @@ const TableNameTLogicalServer = "t_logical_server"
 type TLogicalServer struct {
 	CotsServerID         *string   `json:"cots_server_id"`
 	CdiComputeServerID   *string   `json:"cdi_compute_server_id"`
+	SystemID			 *string   `json:"system_id"`
 	Status               int32     `json:"status"`
 	OsID                 *int32    `json:"os_id"`
 	HostIPAddress        *string   `json:"host_ip_address"`
@@ -81,6 +68,15 @@ func (t *TLogicalServer) parseSingle(json map[string]interface{}) error {
 			t.CdiComputeServerID = &strVal
 		} else {
 			return fmt.Errorf("invalid type for cdi_compute_server_id")
+		}
+	}
+
+	// system_id can be nil or string
+	if val, ok := json["system_id"]; ok && val != nil {
+		if strVal, ok := val.(string); ok {
+			t.SystemID = &strVal
+		} else {
+			return fmt.Errorf("invalid type for system_id")
 		}
 	}
 

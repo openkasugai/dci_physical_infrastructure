@@ -40,6 +40,21 @@ func (m *MockAPI) EXPECT() *MockAPIMockRecorder {
 	return m.recorder
 }
 
+// APIExecuteOAuth mocks base method.
+func (m *MockAPI) APIExecuteOAuth(ctx context.Context, method, url, apiname, apiKey, queryParameter string) (any, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "APIExecuteOAuth", ctx, method, url, apiname, apiKey, queryParameter)
+	ret0, _ := ret[0].(any)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// APIExecuteOAuth indicates an expected call of APIExecuteOAuth.
+func (mr *MockAPIMockRecorder) APIExecuteOAuth(ctx, method, url, apiname, apiKey, queryParameter any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "APIExecuteOAuth", reflect.TypeOf((*MockAPI)(nil).APIExecuteOAuth), ctx, method, url, apiname, apiKey, queryParameter)
+}
+
 // APIExecuteJWTAUth mocks base method.
 func (m *MockAPI) APIExecuteJWTAUth(ctx context.Context, method, url, apiname, jwt, queryParameter string) (any, error) {
 	m.ctrl.T.Helper()

@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package main
 
 import (
@@ -23,19 +9,22 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"sync"
 
 	proto "maas_module/api/proto" // import of gRPC protobuf
-    common "common/api/proto"    // import of common protobuf
+	common "common/api/proto"    // import of common protobuf
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/protobuf/encoding/protojson"
 	"k8s.io/klog/v2"
 
-	"maas_module/factory"                    // import of Maas factory
-	"maas_module/internal/server/interfaces" // import of interface definitions
-	"maas_module/internal/server/utils"      // import of utility functions
+	"maas_module/factory"                                 // import of Maas factory
+	"maas_module/internal/server/implementation/async_job" // import of async job types
+	"maas_module/internal/server/interfaces"              // import of interface definitions
+	"maas_module/internal/server/utils"                   // import of utility functions
 )
 
 // struct of gRPC-server for Maas-Service
@@ -991,6 +980,59 @@ func initKlog() {
 	})
 }
 
+func isWorkerRunMode() bool {
+	return strings.TrimSpace(os.Getenv("MAAS_RUN_MODE")) == "worker"
+}
+
+func runWorkerJob() error {
+	jobType := strings.TrimSpace(os.Getenv("MAAS_JOB_TYPE"))
+	payload := strings.TrimSpace(os.Getenv("MAAS_JOB_PAYLOAD"))
+	if jobType == "" {
+		return errors.New("MAAS_JOB_TYPE is required in worker mode")
+	}
+	if payload == "" {
+		return errors.New("MAAS_JOB_PAYLOAD is required in worker mode")
+	}
+
+	switch async_job.JobType(jobType) {
+	case async_job.JobTypeMachineRegister:
+		var req proto.MachineRegisterRequest
+		if err := protojson.Unmarshal([]byte(payload), &req); err != nil {
+			return fmt.Errorf("failed to decode MachineRegister payload: %w", err)
+		}
+		controller := factory.CreateMaasController(klog.Background(), req.GetProductInfo(), req.GetMaasInfo())
+		if controller == nil {
+			return errors.New("failed to create MaaS controller for MachineRegister")
+		}
+		_, err := controller.MachineRegister(context.Background(), &req)
+		return err
+	case async_job.JobTypeVMCompose:
+		var req proto.VmComposeRequest
+		if err := protojson.Unmarshal([]byte(payload), &req); err != nil {
+			return fmt.Errorf("failed to decode VmCompose payload: %w", err)
+		}
+		controller := factory.CreateMaasController(klog.Background(), req.GetProductInfo(), req.GetMaasInfo())
+		if controller == nil {
+			return errors.New("failed to create MaaS controller for VMCompose")
+		}
+		_, err := controller.VMCompose(context.Background(), &req)
+		return err
+	case async_job.JobTypeKubeadmJoin:
+		var req proto.KubeadmJoinRequest
+		if err := protojson.Unmarshal([]byte(payload), &req); err != nil {
+			return fmt.Errorf("failed to decode KubeadmJoin payload: %w", err)
+		}
+		controller := factory.CreateMaasController(klog.Background(), req.GetProductInfo(), req.GetMaasInfo())
+		if controller == nil {
+			return errors.New("failed to create MaaS controller for KubeadmJoin")
+		}
+		_, err := controller.KubeadmJoin(context.Background(), &req)
+		return err
+	default:
+		return fmt.Errorf("unsupported MAAS_JOB_TYPE: %s", jobType)
+	}
+}
+
 // main process
 func main() {
 	// Initialize and validate environment variables first
@@ -1020,6 +1062,19 @@ func main() {
 	klog.V(9).InfoS("LOG LEVEL 9")
 
 	klog.InfoS("Start dci_physical_infrastructure process", "port", config.ServerPort)
+
+	if isWorkerRunMode() {
+		klog.InfoS("Start worker job", "jobType", os.Getenv("MAAS_JOB_TYPE"))
+		if err := runWorkerJob(); err != nil {
+			klog.Error(err, "worker job failed")
+			if !skipOsExit {
+				os.Exit(1)
+			}
+			return
+		}
+		klog.InfoS("End worker job")
+		return
+	}
 
 	// run gRPC server
 	run(config.ServerPort)

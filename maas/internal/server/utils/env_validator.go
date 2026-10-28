@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package utils
 
 import (
@@ -27,24 +13,42 @@ import (
 
 // Config holds all parsed and validated environment variable configuration
 type Config struct {
-	LogLevel      string
-	ServerPort    int // Parsed as integer
-	VmHostDisk    int // Parsed as integer
-	LxdListenPort int // Parsed as integer
-	SshKey        string
-	TlsEnable     bool   // TLS enabled/disabled flag
-	TlsCertPath   string // TLS certificate directory path
+	LogLevel                 string
+	ServerPort               int // Parsed as integer
+	VmHostDisk               int // Parsed as integer
+	LxdListenPort            int // Parsed as integer
+	SshKey                   string
+	TlsEnable                bool   // TLS enabled/disabled flag
+	TlsCertPath              string // TLS certificate directory path
+	K8sJobWorkerImage        string
+	K8sJobServiceAccount     string
+	K8sJobSSHSecretName      string
+	K8sJobTLSSecretName      string
+	K8sJobBackoffLimit          int32
+	K8sJobTTLSeconds            int32
+	K8sJobActiveDeadlineSecs    int64
+	MaasApiRetryCount           int
+	MaasApiRetryIntervalSeconds int
 }
 
 // EnvConfig holds raw environment variable strings for validation
 type EnvConfig struct {
-	LogLevel      string `validate:"required" env:"LOG_LEVEL"`
-	ServerPort    string `validate:"required" env:"MAAS_SERVER_PORT"`
-	VmHostDisk    string `validate:"required" env:"VM_HOST_DISK"`
-	LxdListenPort string `validate:"required" env:"LXD_PORT"`
-	SshKey        string `validate:"required" env:"SSH_KEY"`
-	TlsEnable     string `validate:"required" env:"TLS_ENABLE"`
-	TlsCertPath   string `validate:"required" env:"TLS_CERT_PATH"`
+	LogLevel                 string `validate:"required" env:"LOG_LEVEL"`
+	ServerPort               string `validate:"required" env:"MAAS_SERVER_PORT"`
+	VmHostDisk               string `validate:"required" env:"VM_HOST_DISK"`
+	LxdListenPort            string `validate:"required" env:"LXD_PORT"`
+	SshKey                   string `validate:"required" env:"SSH_KEY"`
+	TlsEnable                string `validate:"required" env:"TLS_ENABLE"`
+	TlsCertPath              string `validate:"required" env:"TLS_CERT_PATH"`
+	K8sJobWorkerImage        string `validate:"required" env:"K8S_JOB_WORKER_IMAGE"`
+	K8sJobServiceAccount     string `validate:"required" env:"K8S_JOB_SERVICE_ACCOUNT"`
+	K8sJobSSHSecretName      string `validate:"required" env:"K8S_JOB_SSH_SECRET_NAME"`
+	K8sJobTLSSecretName      string `env:"K8S_JOB_TLS_SECRET_NAME"`
+	K8sJobBackoffLimit          string `validate:"required" env:"K8S_JOB_BACKOFF_LIMIT"`
+	K8sJobTTLSeconds            string `validate:"required" env:"K8S_JOB_TTL_SECONDS"`
+	K8sJobActiveDeadlineSecs    string `validate:"required" env:"K8S_JOB_ACTIVE_DEADLINE_SECONDS"`
+	MaasApiRetryCount           string `validate:"required" env:"MAAS_API_RETRY_COUNT"`
+	MaasApiRetryIntervalSeconds string `validate:"required" env:"MAAS_API_RETRY_INTERVAL_SECONDS"`
 }
 
 var (
@@ -86,13 +90,22 @@ func GetConfig() *Config {
 func (ev *EnvValidator) loadAndValidateConfig() (*Config, error) {
 	// Load raw environment variables
 	rawConfig := &EnvConfig{
-		LogLevel:      os.Getenv("LOG_LEVEL"),
-		ServerPort:    os.Getenv("MAAS_SERVER_PORT"),
-		VmHostDisk:    os.Getenv("VM_HOST_DISK"),
-		LxdListenPort: os.Getenv("LXD_PORT"),
-		SshKey:        os.Getenv("SSH_KEY"),
-		TlsEnable:     os.Getenv("TLS_ENABLE"),
-		TlsCertPath:   os.Getenv("TLS_CERT_PATH"),
+		LogLevel:                 os.Getenv("LOG_LEVEL"),
+		ServerPort:               os.Getenv("MAAS_SERVER_PORT"),
+		VmHostDisk:               os.Getenv("VM_HOST_DISK"),
+		LxdListenPort:            os.Getenv("LXD_PORT"),
+		SshKey:                   os.Getenv("SSH_KEY"),
+		TlsEnable:                os.Getenv("TLS_ENABLE"),
+		TlsCertPath:              os.Getenv("TLS_CERT_PATH"),
+		K8sJobWorkerImage:        os.Getenv("K8S_JOB_WORKER_IMAGE"),
+		K8sJobServiceAccount:     os.Getenv("K8S_JOB_SERVICE_ACCOUNT"),
+		K8sJobSSHSecretName:      os.Getenv("K8S_JOB_SSH_SECRET_NAME"),
+		K8sJobTLSSecretName:      os.Getenv("K8S_JOB_TLS_SECRET_NAME"),
+		K8sJobBackoffLimit:          os.Getenv("K8S_JOB_BACKOFF_LIMIT"),
+		K8sJobTTLSeconds:            os.Getenv("K8S_JOB_TTL_SECONDS"),
+		K8sJobActiveDeadlineSecs:    os.Getenv("K8S_JOB_ACTIVE_DEADLINE_SECONDS"),
+		MaasApiRetryCount:           os.Getenv("MAAS_API_RETRY_COUNT"),
+		MaasApiRetryIntervalSeconds: os.Getenv("MAAS_API_RETRY_INTERVAL_SECONDS"),
 	}
 
 	// Run struct validation for required fields
@@ -130,18 +143,73 @@ func (ev *EnvValidator) loadAndValidateConfig() (*Config, error) {
 		return nil, err
 	}
 
+	k8sBackoffLimit, err := ev.parseRequiredInt32(rawConfig.K8sJobBackoffLimit)
+	if err != nil {
+		return nil, errors.New("invalid K8S_JOB_BACKOFF_LIMIT: must be integer")
+	}
+	k8sTTLSeconds, err := ev.parseRequiredInt32(rawConfig.K8sJobTTLSeconds)
+	if err != nil {
+		return nil, errors.New("invalid K8S_JOB_TTL_SECONDS: must be integer")
+	}
+	k8sActiveDeadlineSecs, err := ev.parseRequiredInt64(rawConfig.K8sJobActiveDeadlineSecs)
+	if err != nil {
+		return nil, errors.New("invalid K8S_JOB_ACTIVE_DEADLINE_SECONDS: must be integer")
+	}
+
+	maasApiRetryCount, err := ev.parseRequiredInt(rawConfig.MaasApiRetryCount)
+	if err != nil {
+		return nil, errors.New("invalid MAAS_API_RETRY_COUNT: must be integer")
+	}
+	maasApiRetryIntervalSeconds, err := ev.parseRequiredInt(rawConfig.MaasApiRetryIntervalSeconds)
+	if err != nil {
+		return nil, errors.New("invalid MAAS_API_RETRY_INTERVAL_SECONDS: must be integer")
+	}
+
 	// Create the parsed config
 	config := &Config{
-		LogLevel:      logLevel,
-		ServerPort:    serverPort,
-		VmHostDisk:    vmHostDisk,
-		LxdListenPort: lxdListenPort,
-		SshKey:        rawConfig.SshKey,
-		TlsEnable:     tlsEnable,
-		TlsCertPath:   rawConfig.TlsCertPath,
+		LogLevel:                 logLevel,
+		ServerPort:               serverPort,
+		VmHostDisk:               vmHostDisk,
+		LxdListenPort:            lxdListenPort,
+		SshKey:                   rawConfig.SshKey,
+		TlsEnable:                tlsEnable,
+		TlsCertPath:              rawConfig.TlsCertPath,
+		K8sJobWorkerImage:        rawConfig.K8sJobWorkerImage,
+		K8sJobServiceAccount:     rawConfig.K8sJobServiceAccount,
+		K8sJobSSHSecretName:      rawConfig.K8sJobSSHSecretName,
+		K8sJobTLSSecretName:      rawConfig.K8sJobTLSSecretName,
+		K8sJobBackoffLimit:          k8sBackoffLimit,
+		K8sJobTTLSeconds:            k8sTTLSeconds,
+		K8sJobActiveDeadlineSecs:    k8sActiveDeadlineSecs,
+		MaasApiRetryCount:           maasApiRetryCount,
+		MaasApiRetryIntervalSeconds: maasApiRetryIntervalSeconds,
 	}
 
 	return config, nil
+}
+
+func (ev *EnvValidator) parseRequiredInt(value string) (int, error) {
+	v, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, err
+	}
+	return v, nil
+}
+
+func (ev *EnvValidator) parseRequiredInt32(value string) (int32, error) {
+	v, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, err
+	}
+	return int32(v), nil
+}
+
+func (ev *EnvValidator) parseRequiredInt64(value string) (int64, error) {
+	v, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return v, nil
 }
 
 // NewEnvValidator creates a new instance of EnvValidator
@@ -247,6 +315,20 @@ func (ev *EnvValidator) getEnvVarName(fieldName string) string {
 		return "TLS_ENABLE"
 	case "TlsCertPath":
 		return "TLS_CERT_PATH"
+	case "K8sJobWorkerImage":
+		return "K8S_JOB_WORKER_IMAGE"
+	case "K8sJobServiceAccount":
+		return "K8S_JOB_SERVICE_ACCOUNT"
+	case "K8sJobSSHSecretName":
+		return "K8S_JOB_SSH_SECRET_NAME"
+	case "K8sJobTLSSecretName":
+		return "K8S_JOB_TLS_SECRET_NAME"
+	case "K8sJobBackoffLimit":
+		return "K8S_JOB_BACKOFF_LIMIT"
+	case "K8sJobTTLSeconds":
+		return "K8S_JOB_TTL_SECONDS"
+	case "K8sJobActiveDeadlineSecs":
+		return "K8S_JOB_ACTIVE_DEADLINE_SECONDS"
 	default:
 		return fieldName
 	}

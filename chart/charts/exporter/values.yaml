@@ -1,16 +1,16 @@
 replicaCount: 1
 image:
   repository: localhost/dci_physical_infrastructure/exporter
-  tag: 0.3.7
+  tag: 1.0.0
   pullPolicy: IfNotPresent
 config:
   metrics:
     port: 50055
     endpoint: "/metrics"
   logLevel: "2"
-  interval: 10
+  interval: 60
   p2pEnable: true
-  p2pInterval: 10
+  p2pInterval: 60
   sshPrivateKeyPath: "/etc/ssh-keys/id_ed25519"
 ssh:
   secretName: physical-infrastructure-ssh-keys

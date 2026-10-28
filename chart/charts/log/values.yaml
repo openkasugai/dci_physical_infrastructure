@@ -1,7 +1,7 @@
 replicaCount: 1
 image:
   repository: localhost/dci_physical_infrastructure/log
-  tag: 0.3.7
+  tag: 1.0.0
   pullPolicy: IfNotPresent
 config:
   logging:
@@ -31,7 +31,7 @@ config:
       maxAge: 30
   logLevel: "2"
   serverPort: 50054
-  interval: 10
+  interval: 60
   sshPrivateKeyPath: "/etc/ssh-keys/id_ed25519"
 ssh:
   secretName: physical-infrastructure-ssh-keys

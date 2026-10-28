@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package canonical_maas
 
 import (
@@ -55,8 +41,8 @@ func NewCanonicalMaasAPIImple(logger klog.Logger, accessUrl string, apiKey strin
 }
 
 // API execution
-func (l CanonicalMaasAPIImple) APIExecute(ctx context.Context, method string, apiname string, reqBody string) (statusCode int, jsonData []byte, err error) {
-	klog.V(2).InfoS("API execution", "method", method, "apiname", apiname)
+func (l CanonicalMaasAPIImple) APIExecute(ctx context.Context, method string, apiname string, reqBody string, withRetry bool) (statusCode int, jsonData []byte, err error) {
+	klog.V(2).InfoS("API execution", "method", method, "apiname", apiname, "withRetry", withRetry)
 	klog.V(3).InfoS("start APIExecute", "method", method, "apiname", apiname, "reqBody", reqBody)
 	defer func() {
 		klog.V(2).InfoS("API completed", "statusCode", statusCode, "err", err)
@@ -67,18 +53,50 @@ func (l CanonicalMaasAPIImple) APIExecute(ctx context.Context, method string, ap
 	url := l.AccessUrl + apiname
 	klog.V(3).InfoS("branch: generated request URL", "url", url)
 
-	// execute http request.
-	statusCode, resp, err := l.execRequest(method, url, reqBody)
-
-	// error check.
-	if err != nil {
-		klog.V(2).InfoS("branch: request execution failed", "error", err.Error())
-		return
+	// Determine retry parameters
+	maxAttempts := 1
+	retryInterval := time.Duration(0)
+	if withRetry {
+		cfg := utils.GetConfig()
+		if cfg != nil && cfg.MaasApiRetryCount > 0 {
+			maxAttempts = cfg.MaasApiRetryCount + 1
+		}
+		if cfg != nil && cfg.MaasApiRetryIntervalSeconds > 0 {
+			retryInterval = time.Duration(cfg.MaasApiRetryIntervalSeconds) * time.Second
+		}
 	}
 
-	klog.V(2).InfoS("branch: request execution successful", "statusCode", statusCode)
-	jsonData = resp
-	err = nil
+	// execute http request with retry.
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if attempt > 1 {
+			klog.V(2).InfoS("retrying API request", "attempt", attempt, "maxAttempts", maxAttempts, "method", method, "apiname", apiname)
+			select {
+			case <-ctx.Done():
+				err = ctx.Err()
+				return
+			case <-time.After(retryInterval):
+			}
+		}
+
+		var execErr error
+		statusCode, jsonData, execErr = l.execRequest(method, url, reqBody)
+		if execErr != nil {
+			klog.V(2).InfoS("branch: request execution failed", "attempt", attempt, "error", execErr.Error())
+			err = execErr
+			continue
+		}
+
+		// check HTTP status code: retry on server errors (5xx) or other non-2xx codes
+		if statusCode >= 200 && statusCode < 300 {
+			klog.V(2).InfoS("branch: request execution successful", "statusCode", statusCode)
+			err = nil
+			return
+		}
+
+		klog.V(2).InfoS("branch: request returned non-2xx status", "attempt", attempt, "statusCode", statusCode)
+		err = &utils.HttpError{StatusCode: statusCode, Message: string(jsonData)}
+	}
+
 	return
 }
 

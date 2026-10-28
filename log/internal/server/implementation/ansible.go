@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package implementation
 
 import (
@@ -23,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"fmt"
 
 	"k8s.io/klog/v2"
 	"log_module/internal/server/utils"
@@ -56,21 +43,22 @@ func NewAnsibleImplement(logger klog.Logger) *AnsibleImplement {
 
 // command execution
 func (l AnsibleImplement) CmdExecute(ctx context.Context, remoteHost string, remotUser string, playbook string, extraArgs string) (output interface{}, err error) {
-	l.Logger.V(2).Info("start CmdExecute", "remoteHost", remoteHost, "remotUser", remotUser, "playbook", playbook, "extraArgs", extraArgs)
+	l.Logger.V(3).Info("start CmdExecute", "remoteHost", remoteHost, "remotUser", remotUser, "playbook", playbook)
 	defer func() {
-		l.Logger.V(2).Info("end CmdExecute", "output", output, "err", err)
+		l.Logger.V(3).Info("end CmdExecute", "err", err)
+		l.Logger.V(3).Info("CmdExecute output detail", "output", output)
 	}()
 
-	l.Logger.Info("executing Ansible playbook", "host", remoteHost, "user", remotUser, "playbook", playbook)
+	l.Logger.V(3).Info("executing Ansible playbook", "host", remoteHost, "user", remotUser, "playbook", playbook)
 
 	// get env
 	exePath, _ := os.Executable()
 	filePath, _ := filepath.Abs(exePath)
 	ansible_path := filepath.Join(filepath.Dir(filePath), "internal", "server", "implementation", "ansible")
-	l.Logger.V(2).Info("Ansible path retrieved", "ansiblePath", ansible_path)
+	l.Logger.V(3).Info("Ansible path retrieved", "ansiblePath", ansible_path)
 
 	sshPrivateKeyFile := os.Getenv("SSH_KEY")
-	l.Logger.V(2).Info("SSH key path retrieved", "sshKeyPath", sshPrivateKeyFile)
+	l.Logger.V(3).Info("SSH key path retrieved", "sshKeyPath", sshPrivateKeyFile)
 
 	// generate command lisne arguments
 	args := []string{
@@ -81,10 +69,10 @@ func (l AnsibleImplement) CmdExecute(ctx context.Context, remoteHost string, rem
 		"--private-key", sshPrivateKeyFile,
 	}
 	if extraArgs != "" {
-		l.Logger.V(2).Info("branch: extra arguments provided", "extraArgs", extraArgs)
+		l.Logger.V(3).Info("branch: extra arguments provided", "extraArgs", extraArgs)
 		args = append(append(args, "-e"), extraArgs)
 	} else {
-		l.Logger.V(2).Info("branch: no extra arguments")
+		l.Logger.V(3).Info("branch: no extra arguments")
 	}
 
 	// generate ansible command
@@ -95,7 +83,8 @@ func (l AnsibleImplement) CmdExecute(ctx context.Context, remoteHost string, rem
 	// excetute ansible comamnd
 	out, e := cmd.CombinedOutput()
 	if e != nil {
-		l.Logger.V(2).Info("branch: Ansible command execution failed", "error", e.Error(), "output", string(out))
+		l.Logger.V(2).Info("branch: Ansible command execution failed", "error", e.Error(), "outputSize", len(out))
+		l.Logger.V(3).Info("branch: Ansible command execution failed detail", "output", string(out))
 
         // Extract meaningful error message from Ansible output
         var errorMessage string
@@ -113,17 +102,27 @@ func (l AnsibleImplement) CmdExecute(ctx context.Context, remoteHost string, rem
 		return
 	}
 
-	l.Logger.V(2).Info("branch: Ansible command executed successfully", "outputSize", len(out))
+	l.Logger.V(3).Info("branch: Ansible command executed successfully", "outputSize", len(out))
 
 	// parse ansible result
-	output, err = l.extractMsg(string(out))
-	if err != nil {
-		l.Logger.V(2).Info("branch: Ansible output parsing failed", "error", err.Error())
-		return
+	if (playbook == "cdi_spec_list.yaml") {
+		l.Logger.V(3).Info("branch: parsing CDI wrapper output")
+		_, err = l.parseCDIWrapperOutput(out)
+		if err != nil {
+			l.Logger.V(2).Info("branch: Ansible output parsing failed", "error", err.Error())
+			return
+		}
+	} else {
+		l.Logger.V(3).Info("branch: extracting message from Ansible output")
+		output, err = l.extractMsg(string(out))
+		if err != nil {
+			l.Logger.V(2).Info("branch: Ansible output parsing failed", "error", err.Error())
+			return
+		}
 	}
 
-	l.Logger.V(2).Info("branch: Ansible output parsed successfully")
-	l.Logger.Info("Ansible playbook execution completed", "host", remoteHost, "playbook", playbook)
+	l.Logger.V(3).Info("branch: Ansible output parsed successfully")
+	l.Logger.V(3).Info("Ansible playbook execution completed", "host", remoteHost, "playbook", playbook)
 	return
 }
 
@@ -142,9 +141,9 @@ func fixJSON(input string) string {
 }
 
 func (l AnsibleImplement) extractMsg(input string) (message interface{}, err error) {
-	l.Logger.V(2).Info("start extractMsg", "inputSize", len(input))
+	l.Logger.V(3).Info("start extractMsg", "inputSize", len(input))
 	defer func() {
-		l.Logger.V(2).Info("end extractMsg", "err", err)
+		l.Logger.V(3).Info("end extractMsg", "err", err)
 	}()
 
 	fixedMessage := "invalid cdi response: "
@@ -153,9 +152,8 @@ func (l AnsibleImplement) extractMsg(input string) (message interface{}, err err
 	match := re.FindStringSubmatch(input)
 
 	if len(match) > 1 {
-		l.Logger.V(2).Info("branch: regex match found", "matchCount", len(match))
+		l.Logger.V(3).Info("branch: regex match found", "matchCount", len(match))
 		jsonStr := fixJSON(match[1])
-		l.Logger.V(2).Info("branch: JSON string fixed", "jsonStr", jsonStr)
 
 		var result map[string]interface{}
 		err = json.Unmarshal([]byte(jsonStr), &result)
@@ -164,7 +162,7 @@ func (l AnsibleImplement) extractMsg(input string) (message interface{}, err err
 			return
 		}
 
-		l.Logger.V(2).Info("branch: JSON unmarshal successful", "fieldsCount", len(result))
+		l.Logger.V(3).Info("branch: JSON unmarshal successful", "fieldsCount", len(result))
 
 		msg, ok := result["msg"]
 		if !ok {
@@ -173,7 +171,7 @@ func (l AnsibleImplement) extractMsg(input string) (message interface{}, err err
 			return
 		}
 
-		l.Logger.V(2).Info("branch: 'msg' key extracted successfully")
+		l.Logger.V(3).Info("branch: 'msg' key extracted successfully")
 		message = msg
 	} else {
 		l.Logger.V(2).Info("branch: no regex match found for result output")
@@ -181,4 +179,109 @@ func (l AnsibleImplement) extractMsg(input string) (message interface{}, err err
 	}
 
 	return
+}
+
+// parseCdiWrapperOutput Parse CdiWrapper.sh output directly
+func (l AnsibleImplement) parseCDIWrapperOutput(output []byte) (jsonData map[string]interface{}, err error) {
+	defer func() {
+		l.Logger.V(2).Info("end parseCdiWrapperOutput", "err", err)
+		l.Logger.V(3).Info("parseCdiWrapperOutput detail", "jsonData", jsonData)
+	}()
+	l.Logger.V(3).Info("start parseCdiWrapperOutput",
+		"output_length", len(output))
+	outputStr := string(output)
+	lines := strings.Split(outputStr, "\n")
+
+	var resultType string
+	var dataLines []string
+	var errorMessage string
+
+	// Look for the result type marker
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.Contains(line, "RESULT_TYPE:SUCCESS") {
+			resultType = "SUCCESS"
+			// Collect data lines after the marker
+			resultLines := strings.Split(line, "\\n")
+			if 1 < len(resultLines) {
+				dataLines = resultLines[1:]
+			}
+			break
+		} else if strings.Contains(line, "msg\": \"RESULT_TYPE:ERROR_V_1_0") {
+			resultType = "ERROR_V_1_0"
+			// Get error message from next line
+			resultLines := strings.Split(line, "\\n")
+			if 1 < len(resultLines) {
+				errorMessage = strings.TrimSpace(resultLines[1])
+				errorMessage = strings.TrimSuffix(errorMessage, "\"")
+			}
+			break
+		} else if strings.Contains(line, "msg\": \"RESULT_TYPE:ERROR_V_1_1") {
+			resultType = "ERROR_V_1_1"
+			// Get error message from next line
+			resultLines := strings.Split(line, "\\n")
+			if 1 < len(resultLines) {
+				errorMessage = strings.TrimSpace(resultLines[1])
+				errorMessage = strings.TrimSuffix(errorMessage, "\"")
+			}
+			break
+		} else if strings.Contains(line, "RESULT_TYPE:UNKNOWN") {
+			resultType = "UNKNOWN"
+			resultLines := strings.Split(line, "\\n")
+			if 1 < len(resultLines) {
+				errorMessage = strings.TrimSpace(resultLines[1])
+				errorMessage = strings.TrimSuffix(errorMessage, "\"")
+			}
+			break
+		}
+	}
+
+	fixedMessage := "invalid cdi response"
+	switch resultType {
+	case "SUCCESS":
+		l.Logger.V(3).Info("branch: result type is SUCCESS")
+		// Parse JSON from data lines
+		if len(dataLines) > 0 {
+			jsonStr := strings.Join(dataLines, "\n")
+			jsonStr = strings.TrimSpace(jsonStr)
+			jsonStr = strings.Replace(jsonStr, "\\n", "\n", -1)
+			jsonStr = strings.Replace(jsonStr, "\\\"", "\"", -1)
+			jsonStr = strings.Replace(jsonStr, "}\"", "}", -1)
+
+			// Remove any trailing ansible output or shell prompts
+			if idx := strings.Index(jsonStr, "cdi:"); idx != -1 {
+				jsonStr = jsonStr[:idx]
+				jsonStr = strings.TrimSpace(jsonStr)
+			}
+
+			if jsonStr != "" {
+				l.Logger.V(3).Info("branch: parsing JSON data")
+				var result map[string]interface{}
+				if err := json.Unmarshal([]byte(jsonStr), &result); err == nil {
+					l.Logger.V(3).Info("branch: JSON parsing successful")
+					return result, nil
+				} else {
+					l.Logger.Error(err, fixedMessage+": "+err.Error())
+					return nil, err
+				}
+			}
+		}
+		return nil, nil
+
+	case "ERROR_V_1_0":
+		l.Logger.Error(nil, errorMessage)
+		return nil, errors.New(errorMessage)
+
+	case "ERROR_V_1_1":
+		l.Logger.Error(nil, errorMessage)
+		return nil, errors.New(errorMessage)
+
+	case "UNKNOWN":
+		l.Logger.Error(nil, fixedMessage+errorMessage)
+		return nil, errors.New(fixedMessage+errorMessage)
+
+	default:
+		l.Logger.Error(nil, fixedMessage+fmt.Sprintf(": No valid result type found in output: %s", outputStr))
+		return nil, errors.New(fixedMessage+fmt.Sprintf(": No valid result type found in output: %s", outputStr))
+	}
 }

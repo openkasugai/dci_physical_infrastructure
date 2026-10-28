@@ -5191,6 +5191,17 @@ func (m *KubeadmJoinRequest) validate(all bool) error {
 
 	}
 
+	if ip := net.ParseIP(m.GetNodeIp()); ip == nil || ip.To4() == nil {
+		err := KubeadmJoinRequestValidationError{
+			field:  "NodeIp",
+			reason: "value must be a valid IPv4 address",
+		}
+		if !all {
+			return err
+		}
+		errors = append(errors, err)
+	}
+
 	if len(errors) > 0 {
 		return KubeadmJoinRequestMultiError(errors)
 	}

@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package main
 
 import (
@@ -189,18 +175,18 @@ func main() {
 	// goroutine monitoring process
 	go func() {
 		defer func() {
-			klog.V(2).InfoS("end monitoring goroutine")
+			klog.V(3).InfoS("end monitoring goroutine")
 		}()
-		klog.V(2).InfoS("start monitoring goroutine")
+		klog.V(3).InfoS("start monitoring goroutine")
 
 		for range ticker.C {
 			if !running {
 				klog.V(2).InfoS("branch: monitoring stopped")
 				return
 			}
-			klog.InfoS("ticker triggered")
+			klog.V(3).InfoS("ticker triggered")
 
-			klog.V(2).InfoS("branch: selecting network switch targets")
+			klog.V(3).InfoS("branch: selecting network switch targets")
 			// select network switch target
 			nwList, err := database.SelectNwSwitchTable()
 			if err != nil {
@@ -208,7 +194,7 @@ func main() {
 				klog.Error(err.Error())
 			}
 
-			klog.V(2).InfoS("branch: selecting server targets")
+			klog.V(3).InfoS("branch: selecting server targets")
 			// select server target
 			serverList, err := database.SelectServerTable()
 			if err != nil {
@@ -216,19 +202,19 @@ func main() {
 				klog.Error(err.Error())
 			}
 
-			klog.V(2).InfoS("branch: starting collection processes", "network_targets", len(nwList), "server_targets", len(serverList))
+			klog.V(3).InfoS("branch: starting collection processes", "network_targets", len(nwList), "server_targets", len(serverList))
 			// collection network target
 			go func() {
-				klog.V(2).InfoS("start network collection goroutine")
+				klog.V(3).InfoS("start network collection goroutine")
 				network.Collection(nwList)
-				klog.V(2).InfoS("end network collection goroutine")
+				klog.V(3).InfoS("end network collection goroutine")
 			}()
 
 			// collection server target
 			go func() {
-				klog.V(2).InfoS("start server collection goroutine")
+				klog.V(3).InfoS("start server collection goroutine")
 				server.Colloction(serverList)
-				klog.V(2).InfoS("end server collection goroutine")
+				klog.V(3).InfoS("end server collection goroutine")
 			}()
 		}
 	}()
@@ -242,19 +228,19 @@ func main() {
 		// goroutine monitoring process
 		go func() {
 			defer func() {
-				klog.V(2).InfoS("end p2p monitoring goroutine")
+				klog.V(3).InfoS("end p2p monitoring goroutine")
 			}()
-			klog.V(2).InfoS("start p2p monitoring goroutine")
+			klog.V(3).InfoS("start p2p monitoring goroutine")
 
 			for range p2pTicker.C {
 				if !p2pRunning {
 					klog.V(2).InfoS("branch: p2p monitoring stopped")
 					return
 				}
-				klog.InfoS("p2p ticker triggered")
+				klog.V(3).InfoS("p2p ticker triggered")
 
 
-				klog.V(2).InfoS("branch: selecting server targets")
+				klog.V(3).InfoS("branch: selecting server targets")
 				// select server target
 				serverList, err := database.SelectServerTable()
 				if err != nil {

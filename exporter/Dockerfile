@@ -1,4 +1,4 @@
-FROM golang:1.24.2
+FROM docker.io/golang:1.26.2
 
 WORKDIR /usr/src/exporter_module
 

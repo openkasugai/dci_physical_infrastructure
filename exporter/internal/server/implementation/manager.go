@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package implementation
 
 import (
@@ -19,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
     "errors"
+    "sort"
     "strings"
 	"common/models/extra_parameters"
 	"exporter_module/internal/server/utils"
@@ -50,7 +37,7 @@ func (m *ManagerImplement) ServerList(serverList []interfaces.ServerTargetList) 
 		m,
         m.serverList,
         serverList,
-        func(target interfaces.ServerTargetList) string { return target.ServerID },
+        func(target interfaces.ServerTargetList) string { return target.ServerID + ":" + target.SystemID },
         func(target interfaces.ServerTargetList) []interfaces.MetricLabel { return target.WritedMetrics },
         "server",
     )
@@ -88,7 +75,7 @@ func cleanupMetrics[T any](
     getWritedMetrics func(T) []interfaces.MetricLabel,
     targetType string,
 ) {
-    m.Logger.V(2).Info("start cleanupMetrics", "type", targetType, "previous_count", len(previousList), "current_count", len(currentList))
+    m.Logger.V(3).Info("start cleanupMetrics", "type", targetType, "previous_count", len(previousList), "current_count", len(currentList))
 
 	// create a map for current targets for quick lookup
     currentMap := make(map[string]T)
@@ -104,18 +91,18 @@ func cleanupMetrics[T any](
 		// if target no longer exists, delete all its metrics
         if !existsInCurrent {
             previousMetrics := getWritedMetrics(previous)
-            m.Logger.V(2).Info("branch: target removed, deleting all metrics", "type", targetType, "id", id, "metrics_count", len(previousMetrics))
+            m.Logger.V(3).Info("branch: target removed, deleting all metrics", "type", targetType, "id", id, "metrics_count", len(previousMetrics))
             for _, metric := range previousMetrics {
                 err := m.Metrics.Delete(metric.Metrics, metric.Label)
                 if err != nil {
-                    m.Logger.V(2).Info("branch: metric deletion failed", "type", targetType, "id", id, "label", metric.Label, "error", err.Error())
+                    m.Logger.V(3).Info("branch: metric deletion failed", "type", targetType, "id", id, "label", metric.Label, "error", err.Error())
                 } else {
-                    m.Logger.V(2).Info("branch: metric deleted", "type", targetType, "id", id, "label", metric.Label)
+                    m.Logger.V(3).Info("branch: metric deleted", "type", targetType, "id", id, "label", metric.Label)
                 }
             }
 		// if target still exists, check for removed metrics
         } else {
-            m.Logger.V(2).Info("branch: target exists, checking for removed metrics", "type", targetType, "id", id)
+            m.Logger.V(3).Info("branch: target exists, checking for removed metrics", "type", targetType, "id", id)
 
             previousMetrics := getWritedMetrics(previous)
             currentMetrics := getWritedMetrics(current)
@@ -131,28 +118,34 @@ func cleanupMetrics[T any](
             for _, previousMetric := range previousMetrics {
                 key := m.getMetricKey(previousMetric)
                 if !currentMetricsMap[key] {
-                    m.Logger.V(2).Info("branch: metric removed, deleting", "type", targetType, "id", id, "label", previousMetric.Label)
+                    m.Logger.V(3).Info("branch: metric removed, deleting", "type", targetType, "id", id, "label", previousMetric.Label)
                     err := m.Metrics.Delete(previousMetric.Metrics, previousMetric.Label)
                     if err != nil {
-                        m.Logger.V(2).Info("branch: metric deletion failed", "type", targetType, "id", id, "label", previousMetric.Label, "error", err.Error())
+                        m.Logger.V(3).Info("branch: metric deletion failed", "type", targetType, "id", id, "label", previousMetric.Label, "error", err.Error())
                     } else {
-                        m.Logger.V(2).Info("branch: metric deleted successfully", "type", targetType, "id", id, "label", previousMetric.Label)
+                        m.Logger.V(3).Info("branch: metric deleted successfully", "type", targetType, "id", id, "label", previousMetric.Label)
                     }
                 }
             }
         }
     }
 
-    m.Logger.V(2).Info("end cleanupMetrics", "type", targetType)
+    m.Logger.V(3).Info("end cleanupMetrics", "type", targetType)
 }
 
 // getMetricKey generates a unique key for a metric label map
 func (m *ManagerImplement) getMetricKey(metric interfaces.MetricLabel) string {
-    var labelStr string
-    for k, v := range metric.Label {
-        labelStr += k + "=" + v + ","
+    keys := make([]string, 0, len(metric.Label))
+    for k := range metric.Label {
+        keys = append(keys, k)
     }
-    return labelStr
+    sort.Strings(keys)
+
+    var labelStr string
+    for _, k := range keys {
+        labelStr += k + "=" + metric.Label[k] + ","
+    }
+    return fmt.Sprintf("%p|%s", metric.Metrics, labelStr)
 }
 
 func (m *ManagerImplement) SetP2POn(serverList []interfaces.ServerTargetList) {
@@ -164,22 +157,22 @@ func (m *ManagerImplement) SetP2POn(serverList []interfaces.ServerTargetList) {
     // create a map for previous P2P setting list for quick lookup
     previousP2PMap := make(map[string]interfaces.ServerTargetList)
     for _, previous := range m.p2pSettingList {
-        previousP2PMap[previous.ServerID] = previous
+        previousP2PMap[previous.ServerID+":"+previous.SystemID] = previous
     }
 
     // list to store updated P2P settings
     updatedP2PList := []interfaces.ServerTargetList{}
 
     for _, server := range serverList {
-        m.Logger.V(2).Info("P2P checking server", "server_id", server.ServerID, "ip_address", server.HostIPAddress)
+        m.Logger.V(3).Info("P2P checking server", "server_id", server.ServerID, "ip_address", server.HostIPAddress)
         
         // skip if P2P is disabled
         if !server.P2PEnable {
-            m.Logger.V(2).Info("P2P is disabled, skipping check", "server_id", server.ServerID)
+            m.Logger.V(3).Info("P2P is disabled, skipping check", "server_id", server.ServerID)
             continue
         }
 
-        m.Logger.V(2).Info("P2P is enabled, performing check", "server_id", server.ServerID)
+        m.Logger.V(3).Info("P2P is enabled, performing check", "server_id", server.ServerID)
 
         // get machine status (power ON and P2P enable status)
         isPowerON, p2pEnable, err := m.getMachineStatus(server)
@@ -196,8 +189,8 @@ func (m *ManagerImplement) SetP2POn(serverList []interfaces.ServerTargetList) {
             continue
         }
 
-        // search for previous information by ServerID
-        previous, previousExists := previousP2PMap[server.ServerID]
+        // search for previous information by ServerID + SystemID
+        previous, previousExists := previousP2PMap[server.ServerID+":"+server.SystemID]
         if !previousExists {
             m.Logger.V(2).Info("No previous P2P setting found", "server_id", server.ServerID)
         }
@@ -212,30 +205,30 @@ func (m *ManagerImplement) SetP2POn(serverList []interfaces.ServerTargetList) {
                        (isPowerON && previous.UptimeSeconds > uptimeSeconds)
 
         if shouldSetP2P {
-            m.Logger.V(2).Info("P2P setting trigger condition met", "server_id", server.ServerID, 
+            m.Logger.V(3).Info("P2P setting trigger condition met", "server_id", server.ServerID, 
                 "previousExists", previousExists, "previous_power_on", previous.PowerON, "current_power_on", isPowerON,
                 "previous_uptime", previous.UptimeSeconds, "current_uptime", uptimeSeconds)
 
             // if current P2P is enabled, turn off P2P first
             if p2pEnable {
-                m.Logger.V(2).Info("Turning off P2P before turning on", "server_id", server.ServerID)
+                m.Logger.V(3).Info("Turning off P2P before turning on", "server_id", server.ServerID)
                 err = m.setMachineP2P(server, "off")
                 if err != nil {
-                    m.Logger.V(2).Info("Failed to turn off P2P (ignored)", "server_id", server.ServerID, "error", err.Error())
+                    m.Logger.V(3).Info("Failed to turn off P2P (ignored)", "server_id", server.ServerID, "error", err.Error())
                 }
             }
 
             // turn on P2P
-            m.Logger.V(2).Info("Turning on P2P", "server_id", server.ServerID)
+            m.Logger.V(3).Info("Turning on P2P", "server_id", server.ServerID)
             err = m.setMachineP2P(server, "on")
             if err != nil {
-                m.Logger.V(2).Info("Failed to turn on P2P (ignored)", "server_id", server.ServerID, "error", err.Error())
+                m.Logger.V(3).Info("Failed to turn on P2P (ignored)", "server_id", server.ServerID, "error", err.Error())
             } else {
                 // update p2pEnable status after successful operation
                 p2pEnable = true
             }
         } else {
-            m.Logger.V(2).Info("P2P setting not needed", "server_id", server.ServerID)
+            m.Logger.V(3).Info("P2P setting not needed", "server_id", server.ServerID)
         }
 
         // copy server and update with current information
@@ -249,9 +242,9 @@ func (m *ManagerImplement) SetP2POn(serverList []interfaces.ServerTargetList) {
         if p2pEnable {
             p2pEnableFloat = 1.0
         }
-        err = m.Metrics.Write(p2pEnableGauge, prometheus.Labels{"serverId": server.ServerID}, p2pEnableFloat, &updatedServer.WritedMetrics)
+        err = m.Metrics.Write(p2pEnableGauge, prometheus.Labels{"serverId": server.ServerID, "systemId": server.SystemID}, p2pEnableFloat, &updatedServer.WritedMetrics)
         if err != nil {
-            m.Logger.V(2).Info("branch: p2p_enable metrics write failed", "server_id", server.ServerID, "error", err.Error())
+            m.Logger.V(3).Info("branch: p2p_enable metrics write failed", "server_id", server.ServerID, "error", err.Error())
         }
 
         // add to updated P2P setting list
@@ -260,7 +253,7 @@ func (m *ManagerImplement) SetP2POn(serverList []interfaces.ServerTargetList) {
 
     // update p2pSettingList with current information
     m.p2pSettingList = updatedP2PList
-    m.Logger.V(2).Info("Updated p2pSettingList", "count", len(m.p2pSettingList))
+    m.Logger.V(3).Info("Updated p2pSettingList", "count", len(m.p2pSettingList))
 }
 
 // getMachineStatus retrieves the power and P2P status of a server via Ansible module

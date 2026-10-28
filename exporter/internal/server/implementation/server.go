@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package implementation
 
 import (
@@ -90,27 +76,27 @@ func (l *ServerImplement) Colloction(targetList []interfaces.ServerTargetList) {
         func() {
             defer func() {
                 updateTargetList = append(updateTargetList, target)
-                l.Logger.V(2).Info("branch: target added to update list", "server_id", target.ServerID)
+                l.Logger.V(3).Info("branch: target added to update list", "server_id", target.ServerID)
             }()
-			l.Logger.V(2).Info("branch: processing server target", "index", i, "server_id", target.ServerID)
+			l.Logger.V(3).Info("branch: processing server target", "index", i, "server_id", target.ServerID)
 
 			// Get metrics(CPU/Memory usage)
 			cpuUsage, memoryUsage, err := l.getServerMetrics(target, sshKey, playbook)
 			if err == nil {
-				l.Logger.V(2).Info("branch: server metrics obtained successfully", "server_id", target.ServerID)
+				l.Logger.V(3).Info("branch: server metrics obtained successfully", "server_id", target.ServerID)
 				// write CPU metrics
-				err = l.Metrics.Write(cpuGauge, prometheus.Labels{"serverId": target.ServerID}, cpuUsage, &target.WritedMetrics)
+				err = l.Metrics.Write(cpuGauge, prometheus.Labels{"serverId": target.ServerID, "systemId": target.SystemID}, cpuUsage, &target.WritedMetrics)
 				if err != nil {
-					l.Logger.V(2).Info("branch: CPU metrics write failed", "server_id", target.ServerID, "error", err.Error())
+					l.Logger.V(3).Info("branch: CPU metrics write failed", "server_id", target.ServerID, "error", err.Error())
 				}
 
 				// write memory metrics
-				err = l.Metrics.Write(memoryGauge, prometheus.Labels{"serverId": target.ServerID}, memoryUsage, &target.WritedMetrics)
+				err = l.Metrics.Write(memoryGauge, prometheus.Labels{"serverId": target.ServerID, "systemId": target.SystemID}, memoryUsage, &target.WritedMetrics)
 				if err != nil {
-					l.Logger.V(2).Info("branch: memory metrics write failed", "server_id", target.ServerID, "error", err.Error())
+					l.Logger.V(3).Info("branch: memory metrics write failed", "server_id", target.ServerID, "error", err.Error())
 				}
 			} else {
-				l.Logger.V(2).Info("branch: server metrics collection failed", "server_id", target.ServerID, "error", err.Error())
+				l.Logger.V(3).Info("branch: server metrics collection failed", "server_id", target.ServerID, "error", err.Error())
 			}
 		}()
 	}
@@ -121,52 +107,52 @@ func (l *ServerImplement) Colloction(targetList []interfaces.ServerTargetList) {
 
 func (l *ServerImplement) getServerMetrics(target interfaces.ServerTargetList, sshKey string, playbook string) (cpuUsage float64, memoryUsage float64, err error) {
 	defer func() {
-		l.Logger.V(2).Info("end getServerMetrics",
+		l.Logger.V(3).Info("end getServerMetrics",
 			"server_id", target.ServerID,
 			"cpuUsage", cpuUsage,
 			"memoryUsage", memoryUsage,
 			"error", err)
 	}()
-	l.Logger.V(2).Info("start getServerMetrics",
+	l.Logger.V(3).Info("start getServerMetrics",
 		"server_id", target.ServerID,
 		"host_ip", target.HostIPAddress,
 		"playbook", playbook)
 
-	l.Logger.V(2).Info("branch: executing ansible command", "server_id", target.ServerID)
+	l.Logger.V(3).Info("branch: executing ansible command", "server_id", target.ServerID)
 	output, err := l.Ansible.CmdExecute(context.Background(), target.HostIPAddress, target.LoginUser, sshKey, playbook, "")
 	if err != nil {
-		l.Logger.V(2).Info("branch: ansible command failed", "server_id", target.ServerID, "error", err.Error())
+		l.Logger.V(3).Info("branch: ansible command failed", "server_id", target.ServerID, "error", err.Error())
 		l.Logger.Error(err, err.Error())
 		return
 	}
 
-	l.Logger.V(2).Info("branch: parsing metrics response", "server_id", target.ServerID)
+	l.Logger.V(3).Info("branch: parsing metrics response", "server_id", target.ServerID)
 	fixedErrorMsg := "invalid metrics of server response: "
 	metrics, ok := output.(map[string]interface{})
 	if !ok {
-		l.Logger.V(2).Info("branch: JSON unmarshaling failed", "server_id", target.ServerID)
+		l.Logger.V(3).Info("branch: JSON unmarshaling failed", "server_id", target.ServerID)
 		err = errors.New("failed to unmarshal JSON")
 		l.Logger.Error(err, fixedErrorMsg+err.Error())
 		return
 	}
 
-	l.Logger.V(2).Info("branch: extracting CPU usage", "server_id", target.ServerID)
+	l.Logger.V(3).Info("branch: extracting CPU usage", "server_id", target.ServerID)
 	cpuUsage, err = getJsonFloatValue(metrics, "cpu_usage")
 	if err != nil {
-		l.Logger.V(2).Info("branch: CPU usage extraction failed", "server_id", target.ServerID, "error", err.Error())
+		l.Logger.V(3).Info("branch: CPU usage extraction failed", "server_id", target.ServerID, "error", err.Error())
 		l.Logger.Error(err, fixedErrorMsg+err.Error())
 		return
 	}
 
-	l.Logger.V(2).Info("branch: extracting memory usage", "server_id", target.ServerID)
+	l.Logger.V(3).Info("branch: extracting memory usage", "server_id", target.ServerID)
 	memoryUsage, err = getJsonFloatValue(metrics, "mem_usage")
 	if err != nil {
-		l.Logger.V(2).Info("branch: memory usage extraction failed", "server_id", target.ServerID, "error", err.Error())
+		l.Logger.V(3).Info("branch: memory usage extraction failed", "server_id", target.ServerID, "error", err.Error())
 		l.Logger.Error(err, fixedErrorMsg+err.Error())
 		return
 	}
 
-	l.Logger.V(2).Info("branch: metrics extraction successful", "server_id", target.ServerID)
+	l.Logger.V(3).Info("branch: metrics extraction successful", "server_id", target.ServerID)
 	return
 }
 

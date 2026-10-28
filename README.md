@@ -1,7 +1,5 @@
 [Japanese](./README_ja.md) / [English](./README.md)
 
-> This repository is an early public release of DCI2.0 / DHRC; bug reports are welcome, while feature requests and pull requests will be accepted after the official release planned for the end of September 2026.
-
 # dci_physical_infrastructure
 
 This repository provides physical infrastructure functionality.
@@ -19,7 +17,7 @@ For an overview of DCI2.0 / DHRC, the overall architecture, and repository struc
 To build the repository, follow these steps:
 
 1.  **Prerequisites:**
-    *   Go (version 1.24.2)
+    *   Go (version 1.26.2)
     *   and, required helm, docer, make, buildah
 
 2.  **Clone the repository:**

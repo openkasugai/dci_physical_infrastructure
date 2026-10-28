@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package implementation
 
 import (
@@ -23,7 +9,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httputil"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
 
+	"github.com/google/uuid"
 	"k8s.io/klog/v2"
 )
 
@@ -34,12 +25,13 @@ type APIImplement struct {
 
 // API execution with user authentication
 func (l APIImplement) APIExecuteUserAuth(ctx context.Context, method string, url string, apiname string, loginUser string, loginPass string, queryParameter string) (jsonData interface{}, err error) {
-	l.Logger.V(2).Info("start APIExecuteUserAuth", "method", method, "url", url, "apiname", apiname, "loginUser", loginUser)
+	l.Logger.V(3).Info("start APIExecuteUserAuth", "method", method, "url", url, "apiname", apiname, "loginUser", loginUser)
 	defer func() {
-		l.Logger.V(2).Info("end APIExecuteUserAuth", "jsonData", jsonData, "err", err)
+		l.Logger.V(3).Info("end APIExecuteUserAuth", "err", err)
+		l.Logger.V(3).Info("APIExecuteUserAuth response detail", "jsonData", jsonData)
 	}()
 
-	l.Logger.Info("executing API request with user authentication", "url", url, "api", apiname, "method", method)
+	l.Logger.V(3).Info("executing API request with user authentication", "url", url, "api", apiname, "method", method)
 
 	// execute http request.
 	resp, e := l.execRequestUserAuth(method, url, apiname, loginUser, loginPass, queryParameter)
@@ -51,7 +43,7 @@ func (l APIImplement) APIExecuteUserAuth(ctx context.Context, method string, url
 		return
 	}
 
-	l.Logger.V(2).Info("branch: execRequestUserAuth succeeded")
+	l.Logger.V(3).Info("branch: execRequestUserAuth succeeded")
 	jsonData = resp
 	err = nil
 	return
@@ -59,12 +51,13 @@ func (l APIImplement) APIExecuteUserAuth(ctx context.Context, method string, url
 
 // API execution with JWT authentication
 func (l APIImplement) APIExecuteJWTAUth(ctx context.Context, method string, url string, apiname string, jwt string, queryParameter string) (jsonData interface{}, err error) {
-	l.Logger.V(2).Info("start APIExecuteJWTAUth", "method", method, "url", url, "apiname", apiname)
+	l.Logger.V(3).Info("start APIExecuteJWTAUth", "method", method, "url", url, "apiname", apiname)
 	defer func() {
-		l.Logger.V(2).Info("end APIExecuteJWTAUth", "jsonData", jsonData, "err", err)
+		l.Logger.V(3).Info("end APIExecuteJWTAUth", "err", err)
+		l.Logger.V(3).Info("APIExecuteJWTAUth response detail", "jsonData", jsonData)
 	}()
-	
-	l.Logger.Info("executing API request with JWT", "url", url, "api", apiname, "method", method)
+
+	l.Logger.V(3).Info("executing API request with JWT", "url", url, "api", apiname, "method", method)
 	// execute http request.
 	resp, e := l.execRequestJWTAuth(method, url, apiname, jwt, queryParameter)
 
@@ -74,17 +67,42 @@ func (l APIImplement) APIExecuteJWTAUth(ctx context.Context, method string, url 
 		err = e
 		return
 	}
-	
-	l.Logger.V(2).Info("branch: execRequestJWTAuth succeeded")
+
+	l.Logger.V(3).Info("branch: execRequestJWTAuth succeeded")
+	jsonData = resp
+	err = nil
+	return
+}
+
+// API execution with OAuth authentication
+func (l APIImplement) APIExecuteOAuth(ctx context.Context, method string, url string, apiname string, apiKey string, queryParameter string) (jsonData interface{}, err error) {
+	l.Logger.V(3).Info("start APIExecuteOAuth", "method", method, "url", url, "apiname", apiname)
+	defer func() {
+		l.Logger.V(3).Info("end APIExecuteOAuth", "err", err)
+		l.Logger.V(3).Info("APIExecuteOAuth response detail", "jsonData", jsonData)
+	}()
+
+	l.Logger.V(3).Info("executing API request with JWT", "url", url, "api", apiname, "method", method)
+	// execute http request.
+	resp, e := l.execRequestOAuth(method, url, apiname, apiKey, queryParameter)
+
+	// error check.
+	if e != nil {
+		l.Logger.V(2).Info("branch: APIExecuteOAuth failed", "error", e.Error())
+		err = e
+		return
+	}
+
+	l.Logger.V(3).Info("branch: APIExecuteOAuth succeeded")
 	jsonData = resp
 	err = nil
 	return
 }
 
 func (l APIImplement) execRequestUserAuth(method string, url string, apiname string, loginUser string, loginPass string, queryParameter string) (resp interface{}, err error) {
-	l.Logger.V(2).Info("start execRequest", "method", method, "url", url, "apiname", apiname)
+	l.Logger.V(3).Info("start execRequest", "method", method, "url", url, "apiname", apiname)
 	defer func() {
-		l.Logger.V(2).Info("end execRequest", "err", err)
+		l.Logger.V(3).Info("end execRequest", "err", err)
 	}()
 
 	// generate URL
@@ -92,7 +110,7 @@ func (l APIImplement) execRequestUserAuth(method string, url string, apiname str
 	if queryParameter != "" {
 		reqUrl = fmt.Sprintf(`%s?%s`, reqUrl, queryParameter)
 	}
-	l.Logger.V(2).Info("generated request URL", "url", reqUrl)
+	l.Logger.V(3).Info("generated request URL", "url", reqUrl)
 
 	// create request.
 	var reqNr *http.Request
@@ -104,7 +122,7 @@ func (l APIImplement) execRequestUserAuth(method string, url string, apiname str
 	reqNr.SetBasicAuth(loginUser, loginPass)
 	reqNr.Header.Set("Accept", "application/json")
 
-	l.Logger.V(2).Info("branch: HTTP request created successfully")
+	l.Logger.V(3).Info("branch: HTTP request created successfully")
 
 	// send request.
 	resp, err = l.execRequest(reqNr)
@@ -112,15 +130,15 @@ func (l APIImplement) execRequestUserAuth(method string, url string, apiname str
 		l.Logger.V(2).Info("branch: execRequest failed", "error", err.Error())
 		return
 	}
-	
-	l.Logger.V(2).Info("branch: execRequest succeeded")
+
+	l.Logger.V(3).Info("branch: execRequest succeeded")
 	return
 }
 
 func (l APIImplement) execRequestJWTAuth(method string, url string, apiname string, jwt string, queryParameter string) (resp interface{}, err error) {
-	l.Logger.V(2).Info("start execRequestJWTAuth", "method", method, "url", url, "apiname", apiname)
+	l.Logger.V(3).Info("start execRequestJWTAuth", "method", method, "url", url, "apiname", apiname)
 	defer func() {
-		l.Logger.V(2).Info("end execRequestJWTAuth", "err", err)
+		l.Logger.V(3).Info("end execRequestJWTAuth", "err", err)
 	}()
 
 	// generate URL
@@ -128,7 +146,7 @@ func (l APIImplement) execRequestJWTAuth(method string, url string, apiname stri
 	if queryParameter != "" {
 		reqUrl = fmt.Sprintf(`%s?%s`, reqUrl, queryParameter)
 	}
-	l.Logger.V(2).Info("generated request URL", "url", reqUrl)
+	l.Logger.V(3).Info("generated request URL", "url", reqUrl)
 
 	// create request.
 	var reqNr *http.Request
@@ -140,7 +158,7 @@ func (l APIImplement) execRequestJWTAuth(method string, url string, apiname stri
 	reqNr.Header.Set("Authorization", fmt.Sprintf("Bearer %s", jwt))
 	reqNr.Header.Set("Accept", "application/json")
 
-	l.Logger.V(2).Info("branch: HTTP request created successfully")
+	l.Logger.V(3).Info("branch: HTTP request created successfully")
 
 	// send request.
 	resp, err = l.execRequest(reqNr)
@@ -149,20 +167,84 @@ func (l APIImplement) execRequestJWTAuth(method string, url string, apiname stri
 		return
 	}
 
-	l.Logger.V(2).Info("branch: execRequest succeeded")
+	l.Logger.V(3).Info("branch: execRequest succeeded")
+	return
+}
+
+func (l APIImplement) execRequestOAuth(method string, baseUrl string, apiname string, apiKey string, queryParameter string) (resp interface{}, err error) {
+	l.Logger.V(3).Info("start execRequestOAuth", "method", method, "url", baseUrl, "apiname", apiname)
+	defer func() {
+		l.Logger.V(3).Info("end execRequestOAuth", "err", err)
+	}()
+
+	// generate URL
+	reqUrl := fmt.Sprintf(`%s/%s`, baseUrl, apiname)
+	if queryParameter != "" {
+		reqUrl = fmt.Sprintf(`%s?%s`, reqUrl, queryParameter)
+	}
+	l.Logger.V(3).Info("generated request URL", "url", reqUrl)
+
+	// create request.
+	var reqNr *http.Request
+	reqNr, err = http.NewRequest(method, reqUrl, nil)
+	if err != nil {
+		l.Logger.V(2).Info("branch: NewRequest failed", "error", err.Error())
+		return
+	}
+	// reqNr.Header.Set("Authorization", fmt.Sprintf("Bearer %s", jwt))
+	// reqNr.Header.Set("Accept", "application/json")
+	parts := strings.Split(apiKey, ":")
+	if len(parts) != 3 {
+		klog.V(2).InfoS("branch: invalid API key format", "parts_count", len(parts))
+		return
+	}
+
+	oauthConsumerKey := parts[0]
+	oauthToken := parts[1]
+	oauthSignature := "&" + parts[2]
+
+	// other parameters
+	oauthVersion := "1.0"
+	oauthNonce := uuid.New().String()
+	oauthTimestamp := strconv.FormatInt(time.Now().Unix(), 10)
+
+	// generate oauth header
+	oauthHeader := fmt.Sprintf(
+		`OAuth oauth_version="%s", oauth_signature_method="PLAINTEXT", oauth_consumer_key="%s", oauth_token="%s", oauth_signature="%s", oauth_nonce="%s", oauth_timestamp="%s"`,
+		oauthVersion,
+		url.QueryEscape(oauthConsumerKey),
+		url.QueryEscape(oauthToken),
+		url.QueryEscape(oauthSignature),
+		oauthNonce,
+		oauthTimestamp,
+	)
+	klog.V(3).InfoS("branch: OAuth header generated", "oauthNonce", oauthNonce, "oauthTimestamp", oauthTimestamp)
+
+	reqNr.Header.Set("Authorization", oauthHeader)
+
+	l.Logger.V(3).Info("branch: HTTP request created successfully")
+
+	// send request.
+	resp, err = l.execRequest(reqNr)
+	if err != nil {
+		l.Logger.V(2).Info("branch: execRequest failed", "error", err.Error())
+		return
+	}
+
+	l.Logger.V(3).Info("branch: execRequest succeeded")
 	return
 }
 
 func (l APIImplement) execRequest(reqNr *http.Request) (resp interface{}, err error) {
-	l.Logger.V(2).Info("start execRequest")
+	l.Logger.V(3).Info("start execRequest")
 	defer func() {
-		l.Logger.V(2).Info("end execRequest", "err", err)
+		l.Logger.V(3).Info("end execRequest", "err", err)
 	}()
 
 	// logging for debug
 	dump, err := httputil.DumpRequestOut(reqNr, true)
 	if err == nil {
-		l.Logger.V(2).Info("HTTP request dump", "dump", string(dump))
+		l.Logger.V(3).Info("HTTP request dump", "dump", string(dump))
 	} else {
 		l.Logger.V(2).Info("branch: HTTP request dump failed", "error", err.Error())
 	}
@@ -206,7 +288,7 @@ func (l APIImplement) execRequest(reqNr *http.Request) (resp interface{}, err er
 		},
 	}
 	client := &http.Client{Transport: tr}
-	l.Logger.V(2).Info("branch: HTTP client configured with TLS settings")
+	l.Logger.V(3).Info("branch: HTTP client configured with TLS settings")
 
 	// send request.
 	respCd, err := client.Do(reqNr)
@@ -216,7 +298,7 @@ func (l APIImplement) execRequest(reqNr *http.Request) (resp interface{}, err er
 	}
 	defer func() { _ = respCd.Body.Close() }()
 
-	l.Logger.V(2).Info("branch: HTTP request completed", "statusCode", respCd.StatusCode)
+	l.Logger.V(3).Info("branch: HTTP request completed", "statusCode", respCd.StatusCode)
 
 	// read response body.
 	result, err := io.ReadAll(respCd.Body)
@@ -225,16 +307,18 @@ func (l APIImplement) execRequest(reqNr *http.Request) (resp interface{}, err er
 		return
 	}
 
-	l.Logger.V(2).Info("branch: response body read successfully", "bodySize", len(result))
+	l.Logger.V(3).Info("branch: response body read successfully", "bodySize", len(result))
+	l.Logger.V(3).Info("branch: response body detail", "body", string(result))
 
 	// HTTP status check
 	if respCd.StatusCode < 200 || respCd.StatusCode >= 300 { // not 2xx -> error status
-		l.Logger.V(2).Info("branch: HTTP status error", "statusCode", respCd.StatusCode, "response", string(result))
+		l.Logger.V(2).Info("branch: HTTP status error", "statusCode", respCd.StatusCode, "responseSize", len(result))
+		l.Logger.V(3).Info("branch: HTTP status error detail", "response", string(result))
 		err = &CustomError{StatusCode: respCd.StatusCode, Message: string(result)}
 		return
 	}
 
-	l.Logger.V(2).Info("branch: HTTP status successful", "statusCode", respCd.StatusCode)
+	l.Logger.V(3).Info("branch: HTTP status successful", "statusCode", respCd.StatusCode)
 
 	// extract JSON response
 	resp, err = l.extracJsonResponse(result)
@@ -243,14 +327,14 @@ func (l APIImplement) execRequest(reqNr *http.Request) (resp interface{}, err er
 		return
 	}
 
-	l.Logger.V(2).Info("branch: JSON extraction successful")
+	l.Logger.V(3).Info("branch: JSON extraction successful")
 	return
 }
 
 func (l APIImplement) extracJsonResponse(ressponseBody []byte) (jsonResponse interface{}, err error) {
-	l.Logger.V(2).Info("start extracJsonResponse", "bodySize", len(ressponseBody))
+	l.Logger.V(3).Info("start extracJsonResponse", "bodySize", len(ressponseBody))
 	defer func() {
-		l.Logger.V(2).Info("end extracJsonResponse", "err", err)
+		l.Logger.V(3).Info("end extracJsonResponse", "err", err)
 	}()
 
 	var result interface{}
@@ -261,7 +345,8 @@ func (l APIImplement) extracJsonResponse(ressponseBody []byte) (jsonResponse int
 		return
 	}
 
-	l.Logger.V(2).Info("branch: JSON unmarshal successful")
+	l.Logger.V(3).Info("branch: JSON unmarshal successful")
 	jsonResponse = result
 	return
 }
+

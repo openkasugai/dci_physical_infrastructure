@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package canonical_maas
 
 import (
@@ -118,7 +104,7 @@ func TestAPIExecute_ValidEnvironment_ExecutesSuccessfully(t *testing.T) {
 	ctx := context.Background()
 
 	// Act
-	statusCode, jsonData, err := api.APIExecute(ctx, "GET", "api/test/", "")
+	statusCode, jsonData, err := api.APIExecute(ctx, "GET", "api/test/", "", false)
 
 	// Assert
 	if err != nil {
@@ -168,7 +154,7 @@ func TestAPIExecute_MissingAccessURL_ReturnsError(t *testing.T) {
 	ctx := context.Background()
 
 	// Act
-	_, _, err := api.APIExecute(ctx, "GET", "api/test/", "")
+	_, _, err := api.APIExecute(ctx, "GET", "api/test/", "", false)
 
 	// Assert
 	// The request will still be made, but with empty base URL
@@ -214,7 +200,7 @@ func TestAPIExecute_WithRequestBody_SendsBodyCorrectly(t *testing.T) {
 	requestBody := "name=test&value=123"
 
 	// Act
-	statusCode, _, err := api.APIExecute(ctx, "POST", "api/create/", requestBody)
+	statusCode, _, err := api.APIExecute(ctx, "POST", "api/create/", requestBody, false)
 
 	// Assert
 	if err != nil {
@@ -582,7 +568,7 @@ func TestAPIExecute_ContextCancellation_HandlesCorrectly(t *testing.T) {
 	cancel() // Cancel immediately
 
 	// Act
-	statusCode, _, err := api.APIExecute(ctx, "GET", "api/test/", "")
+	statusCode, _, err := api.APIExecute(ctx, "GET", "api/test/", "", false)
 
 	// Assert
 	// Note: The current implementation doesn't actually use the context for cancellation
@@ -630,7 +616,7 @@ func TestAPIExecute_DifferentHTTPMethods_WorksCorrectly(t *testing.T) {
 			ctx := context.Background()
 
 			// Act
-			statusCode, _, err := api.APIExecute(ctx, method, "api/test/", "")
+			statusCode, _, err := api.APIExecute(ctx, method, "api/test/", "", false)
 
 			// Assert
 			if err != nil {

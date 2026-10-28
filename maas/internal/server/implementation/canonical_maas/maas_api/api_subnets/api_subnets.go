@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package api_subnets
 
 import (
@@ -41,7 +27,7 @@ func (s *Subnets) GET(ctx context.Context) (response_body.Resbody, error) {
 	}()
 
 	// execute API call to get subnets
-	statusCode, data, err := s.API.APIExecute(ctx, "GET", "subnets/", "")
+	statusCode, data, err := s.API.APIExecute(ctx, "GET", "subnets/", "", s.WithRetry)
 	if err != nil {
 		klog.V(2).InfoS("branch: subnets API execution failed", "error", err.Error())
 		return nil, err
@@ -87,7 +73,7 @@ func (s *Subnets) POST(ctx context.Context, reqBody request_body.Reqbody) (respo
 
 	// execute API call to create a subnet
 	apiReqBody := fmt.Sprintf("cidr=%s&fabric=%v&vid=%v", url.QueryEscape(req.Cidr), req.FabricID, req.Vid)
-	statusCode, data, err := s.API.APIExecute(ctx, "POST", "subnets/", apiReqBody)
+	statusCode, data, err := s.API.APIExecute(ctx, "POST", "subnets/", apiReqBody, s.WithRetry)
 	if err != nil {
 		klog.V(2).InfoS("branch: subnet creation API execution failed", "error", err.Error())
 		return nil, err
@@ -128,7 +114,7 @@ func (s *SubnetUnreservedIPRanges) GET(ctx context.Context) (response_body.Resbo
 
 	// execute API call to get unreserved IP ranges
 	apiPath := fmt.Sprintf("subnets/%d/op-unreserved_ip_ranges", s.SubnetID)
-	statusCode, data, err := s.API.APIExecute(ctx, "GET", apiPath, "")
+	statusCode, data, err := s.API.APIExecute(ctx, "GET", apiPath, "", s.WithRetry)
 	if err != nil {
 		klog.V(2).InfoS("branch: unreserved IP ranges API execution failed", "error", err.Error())
 		return nil, err

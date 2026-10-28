@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package maas_api
 
 import (
@@ -34,13 +20,28 @@ type MaasAPIFactoryImple struct {
 	Logger klog.Logger
 }
 
+// extractRetryFlag extracts the retry flag from the last element of args if it is a bool.
+// Returns false if no bool is found as the last argument.
+func extractRetryFlag(args []interface{}) bool {
+	if len(args) == 0 {
+		return false
+	}
+	if flag, ok := args[len(args)-1].(bool); ok {
+		return flag
+	}
+	return false
+}
+
+
+
 // NewSubnets creates a new instance of Subnets with the provided arguments.
 func (l MaasAPIFactoryImple) NewSubnets(args ...interface{}) maas_api.BasisMaasAPI {
 	klog.V(2).InfoS("start NewSubnets", "args", args)
 	result := &api_subnets.Subnets{
 		AbstractMaas: maas_api.AbstractMaas{
-			API:    l.API,
-			Logger: l.Logger,
+			API:       l.API,
+			Logger:    l.Logger,
+			WithRetry: extractRetryFlag(args),
 		},
 	}
 	klog.V(2).InfoS("end NewSubnets", "result", "Subnets instance created")
@@ -52,8 +53,9 @@ func (l MaasAPIFactoryImple) NewVMHosts(args ...interface{}) maas_api.BasisMaasA
 	klog.V(2).InfoS("start NewVMHosts", "args", args)
 	result := &api_vmhosts.VMhosts{
 		AbstractMaas: maas_api.AbstractMaas{
-			API:    l.API,
-			Logger: l.Logger,
+			API:       l.API,
+			Logger:    l.Logger,
+			WithRetry: extractRetryFlag(args),
 		},
 	}
 	klog.V(2).InfoS("end NewVMHosts", "result", "VMhosts instance created")
@@ -76,8 +78,9 @@ func (l MaasAPIFactoryImple) NewVMHostHostID(args ...interface{}) maas_api.Basis
 
 	result := &api_vmhosts.VMhostHostID{
 		AbstractMaas: maas_api.AbstractMaas{
-			API:    l.API,
-			Logger: l.Logger,
+			API:       l.API,
+			Logger:    l.Logger,
+			WithRetry: extractRetryFlag(args),
 		},
 		HostID: hostID,
 	}
@@ -90,8 +93,9 @@ func (l MaasAPIFactoryImple) NewVMHostCompose(args ...interface{}) maas_api.Basi
 	return &api_vmhosts.VMhostCompose{
 		VMhostHostID: api_vmhosts.VMhostHostID{
 			AbstractMaas: maas_api.AbstractMaas{
-				API:    l.API,
-				Logger: l.Logger,
+				API:       l.API,
+				Logger:    l.Logger,
+				WithRetry: extractRetryFlag(args),
 			},
 			HostID: args[0].(int),
 		},
@@ -103,8 +107,9 @@ func (l MaasAPIFactoryImple) NewVMHostRefresh(args ...interface{}) maas_api.Basi
 	return &api_vmhosts.VMhostRefresh{
 		VMhostHostID: api_vmhosts.VMhostHostID{
 			AbstractMaas: maas_api.AbstractMaas{
-				API:    l.API,
-				Logger: l.Logger,
+				API:       l.API,
+				Logger:    l.Logger,
+				WithRetry: extractRetryFlag(args),
 			},
 			HostID: args[0].(int),
 		},
@@ -116,8 +121,9 @@ func (l MaasAPIFactoryImple) NewVMHostParameters(args ...interface{}) maas_api.B
 	return &api_vmhosts.VMhostParameters{
 		VMhostHostID: api_vmhosts.VMhostHostID{
 			AbstractMaas: maas_api.AbstractMaas{
-				API:    l.API,
-				Logger: l.Logger,
+				API:       l.API,
+				Logger:    l.Logger,
+				WithRetry: extractRetryFlag(args),
 			},
 			HostID: args[0].(int),
 		},
@@ -128,8 +134,9 @@ func (l MaasAPIFactoryImple) NewVMHostParameters(args ...interface{}) maas_api.B
 func (l MaasAPIFactoryImple) NewInterfaces(args ...interface{}) maas_api.BasisMaasAPI {
 	return &api_interfaces.Interfaces{
 		AbstractMaas: maas_api.AbstractMaas{
-			API:    l.API,
-			Logger: l.Logger,
+			API:       l.API,
+			Logger:    l.Logger,
+			WithRetry: extractRetryFlag(args),
 		},
 		SystemID: args[0].(string),
 	}
@@ -140,8 +147,9 @@ func (l MaasAPIFactoryImple) NewInterfaceLink(args ...interface{}) maas_api.Basi
 	return &api_interfaces.InterfaceLinkSubnet{
 		Interfaces: api_interfaces.Interfaces{
 			AbstractMaas: maas_api.AbstractMaas{
-				API:    l.API,
-				Logger: l.Logger,
+				API:       l.API,
+				Logger:    l.Logger,
+				WithRetry: extractRetryFlag(args),
 			},
 			SystemID: args[0].(string),
 		},
@@ -154,8 +162,9 @@ func (l MaasAPIFactoryImple) NewInterfaceDisconnect(args ...interface{}) maas_ap
 	return &api_interfaces.InterfaceDisconnect{
 		Interfaces: api_interfaces.Interfaces{
 			AbstractMaas: maas_api.AbstractMaas{
-				API:    l.API,
-				Logger: l.Logger,
+				API:       l.API,
+				Logger:    l.Logger,
+				WithRetry: extractRetryFlag(args),
 			},
 			SystemID: args[0].(string),
 		},
@@ -168,8 +177,9 @@ func (l MaasAPIFactoryImple) NewInterfaceAddTag(args ...interface{}) maas_api.Ba
 	return &api_interfaces.InterfaceAddTag{
 		Interfaces: api_interfaces.Interfaces{
 			AbstractMaas: maas_api.AbstractMaas{
-				API:    l.API,
-				Logger: l.Logger,
+				API:       l.API,
+				Logger:    l.Logger,
+				WithRetry: extractRetryFlag(args),
 			},
 			SystemID: args[0].(string),
 		},
@@ -182,8 +192,9 @@ func (l MaasAPIFactoryImple) NewInterfaceRemoveTag(args ...interface{}) maas_api
 	return &api_interfaces.InterfaceRemoveTag{
 		Interfaces: api_interfaces.Interfaces{
 			AbstractMaas: maas_api.AbstractMaas{
-				API:    l.API,
-				Logger: l.Logger,
+				API:       l.API,
+				Logger:    l.Logger,
+				WithRetry: extractRetryFlag(args),
 			},
 			SystemID: args[0].(string),
 		},
@@ -196,8 +207,9 @@ func (l MaasAPIFactoryImple) NewInterfaceUpdate(args ...interface{}) maas_api.Ba
 	return &api_interfaces.InterfaceUpdate{
 		Interfaces: api_interfaces.Interfaces{
 			AbstractMaas: maas_api.AbstractMaas{
-				API:    l.API,
-				Logger: l.Logger,
+				API:       l.API,
+				Logger:    l.Logger,
+				WithRetry: extractRetryFlag(args),
 			},
 			SystemID: args[0].(string),
 		},
@@ -210,8 +222,9 @@ func (l MaasAPIFactoryImple) NewMachines(args ...interface{}) maas_api.BasisMaas
 	klog.V(2).InfoS("start NewMachines", "args", args)
 	result := &api_machines.Machines{
 		AbstractMaas: maas_api.AbstractMaas{
-			API:    l.API,
-			Logger: l.Logger,
+			API:       l.API,
+			Logger:    l.Logger,
+			WithRetry: extractRetryFlag(args),
 		},
 	}
 	klog.V(2).InfoS("end NewMachines", "result", "Machines instance created")
@@ -222,8 +235,9 @@ func (l MaasAPIFactoryImple) NewMachines(args ...interface{}) maas_api.BasisMaas
 func (l MaasAPIFactoryImple) NewMachineSystemID(args ...interface{}) maas_api.BasisMaasAPI {
 	return &api_machines.MachineSystemID{
 		AbstractMaas: maas_api.AbstractMaas{
-			API:    l.API,
-			Logger: l.Logger,
+			API:       l.API,
+			Logger:    l.Logger,
+			WithRetry: extractRetryFlag(args),
 		},
 		SystemID: args[0].(string),
 	}
@@ -234,8 +248,9 @@ func (l MaasAPIFactoryImple) NewMachineRelease(args ...interface{}) maas_api.Bas
 	return &api_machines.MachineRelease{
 		MachineSystemID: api_machines.MachineSystemID{
 			AbstractMaas: maas_api.AbstractMaas{
-				API:    l.API,
-				Logger: l.Logger,
+				API:       l.API,
+				Logger:    l.Logger,
+				WithRetry: extractRetryFlag(args),
 			},
 			SystemID: args[0].(string),
 		},
@@ -247,8 +262,9 @@ func (l MaasAPIFactoryImple) NewMachineDeploy(args ...interface{}) maas_api.Basi
 	return &api_machines.MachineDeploy{
 		MachineSystemID: api_machines.MachineSystemID{
 			AbstractMaas: maas_api.AbstractMaas{
-				API:    l.API,
-				Logger: l.Logger,
+				API:       l.API,
+				Logger:    l.Logger,
+				WithRetry: extractRetryFlag(args),
 			},
 			SystemID: args[0].(string),
 		},
@@ -260,8 +276,9 @@ func (l MaasAPIFactoryImple) NewMachineCommission(args ...interface{}) maas_api.
 	return &api_machines.MachineCommission{
 		MachineSystemID: api_machines.MachineSystemID{
 			AbstractMaas: maas_api.AbstractMaas{
-				API:    l.API,
-				Logger: l.Logger,
+				API:       l.API,
+				Logger:    l.Logger,
+				WithRetry: extractRetryFlag(args),
 			},
 			SystemID: args[0].(string),
 		},
@@ -273,8 +290,9 @@ func (l MaasAPIFactoryImple) NewMachineAbort(args ...interface{}) maas_api.Basis
 	return &api_machines.MachineAbort{
 		MachineSystemID: api_machines.MachineSystemID{
 			AbstractMaas: maas_api.AbstractMaas{
-				API:    l.API,
-				Logger: l.Logger,
+				API:       l.API,
+				Logger:    l.Logger,
+				WithRetry: extractRetryFlag(args),
 			},
 			SystemID: args[0].(string),
 		},
@@ -286,8 +304,9 @@ func (l MaasAPIFactoryImple) NewMachinePowerON(args ...interface{}) maas_api.Bas
 	return &api_machines.MachinePowerON{
 		MachineSystemID: api_machines.MachineSystemID{
 			AbstractMaas: maas_api.AbstractMaas{
-				API:    l.API,
-				Logger: l.Logger,
+				API:       l.API,
+				Logger:    l.Logger,
+				WithRetry: extractRetryFlag(args),
 			},
 			SystemID: args[0].(string),
 		},
@@ -299,8 +318,9 @@ func (l MaasAPIFactoryImple) NewMachinePowerOFF(args ...interface{}) maas_api.Ba
 	return &api_machines.MachinePowerOFF{
 		MachineSystemID: api_machines.MachineSystemID{
 			AbstractMaas: maas_api.AbstractMaas{
-				API:    l.API,
-				Logger: l.Logger,
+				API:       l.API,
+				Logger:    l.Logger,
+				WithRetry: extractRetryFlag(args),
 			},
 			SystemID: args[0].(string),
 		},
@@ -312,8 +332,9 @@ func (l MaasAPIFactoryImple) NewMachineMarkBroken(args ...interface{}) maas_api.
 	return &api_machines.MachineMarkBroken{
 		MachineSystemID: api_machines.MachineSystemID{
 			AbstractMaas: maas_api.AbstractMaas{
-				API:    l.API,
-				Logger: l.Logger,
+				API:       l.API,
+				Logger:    l.Logger,
+				WithRetry: extractRetryFlag(args),
 			},
 			SystemID: args[0].(string),
 		},
@@ -324,8 +345,9 @@ func (l MaasAPIFactoryImple) NewMachineMarkBroken(args ...interface{}) maas_api.
 func (l MaasAPIFactoryImple) NewIPRanges(args ...interface{}) maas_api.BasisMaasAPI {
 	return &api_ipranges.IPranges{
 		AbstractMaas: maas_api.AbstractMaas{
-			API:    l.API,
-			Logger: l.Logger,
+			API:       l.API,
+			Logger:    l.Logger,
+			WithRetry: extractRetryFlag(args),
 		},
 	}
 }
@@ -334,8 +356,9 @@ func (l MaasAPIFactoryImple) NewIPRanges(args ...interface{}) maas_api.BasisMaas
 func (l MaasAPIFactoryImple) NewFabrics(args ...interface{}) maas_api.BasisMaasAPI {
 	return &api_fabrics.Fabrics{
 		AbstractMaas: maas_api.AbstractMaas{
-			API:    l.API,
-			Logger: l.Logger,
+			API:       l.API,
+			Logger:    l.Logger,
+			WithRetry: extractRetryFlag(args),
 		},
 	}
 }
@@ -344,8 +367,9 @@ func (l MaasAPIFactoryImple) NewFabrics(args ...interface{}) maas_api.BasisMaasA
 func (l MaasAPIFactoryImple) NewIPAddressReserve(args ...interface{}) maas_api.BasisMaasAPI {
 	return &api_ipaddresses.IPAddressReserve{
 		AbstractMaas: maas_api.AbstractMaas{
-			API:    l.API,
-			Logger: l.Logger,
+			API:       l.API,
+			Logger:    l.Logger,
+			WithRetry: extractRetryFlag(args),
 		},
 	}
 }
@@ -354,8 +378,9 @@ func (l MaasAPIFactoryImple) NewIPAddressReserve(args ...interface{}) maas_api.B
 func (l MaasAPIFactoryImple) NewIPAddressRelease(args ...interface{}) maas_api.BasisMaasAPI {
 	return &api_ipaddresses.IPAddressRelease{
 		AbstractMaas: maas_api.AbstractMaas{
-			API:    l.API,
-			Logger: l.Logger,
+			API:       l.API,
+			Logger:    l.Logger,
+			WithRetry: extractRetryFlag(args),
 		},
 	}
 }
@@ -375,8 +400,9 @@ func (l MaasAPIFactoryImple) NewSubnetUnreservedIPRanges(args ...interface{}) ma
 
 	return &api_subnets.SubnetUnreservedIPRanges{
 		AbstractMaas: maas_api.AbstractMaas{
-			API:    l.API,
-			Logger: l.Logger,
+			API:       l.API,
+			Logger:    l.Logger,
+			WithRetry: extractRetryFlag(args),
 		},
 		SubnetID: subnetID,
 	}

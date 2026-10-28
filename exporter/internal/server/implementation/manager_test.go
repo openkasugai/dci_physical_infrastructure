@@ -1,22 +1,9 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package implementation
 
 import (
 "context"
 "errors"
+"strings"
 "testing"
 
 "github.com/prometheus/client_golang/prometheus"
@@ -30,6 +17,7 @@ DeleteCalled int
 DeleteError  error
 WriteCalled  int
 WriteError   error
+WrittenLabels []prometheus.Labels
 }
 
 func (m *MockMetricsForManager) Init(metricsArray []*prometheus.GaugeVec) error {
@@ -40,6 +28,7 @@ func (m *MockMetricsForManager) Finalize() {}
 
 func (m *MockMetricsForManager) Write(metrics *prometheus.GaugeVec, label prometheus.Labels, value float64, writedMetrics *[]interfaces.MetricLabel) error {
 m.WriteCalled++
+m.WrittenLabels = append(m.WrittenLabels, label)
 if m.WriteError != nil {
 return m.WriteError
 }
@@ -475,11 +464,8 @@ func TestManagerImplement_getMetricKey_WithMultipleLabels(t *testing.T) {
 	}
 
 	key := manager.getMetricKey(metric)
-	// Note: map iteration order is non-deterministic, so just check both keys are present
-	if !(len(key) > 0 && (key == "serverId=server-001,type=cpu," || key == "type=cpu,serverId=server-001,")) {
-		if !((len(key) > 10) && len(key) < 50) {
-			t.Errorf("expected key to contain both label pairs, got %s", key)
-		}
+	if !strings.Contains(key, "|serverId=server-001,type=cpu,") {
+		t.Errorf("expected stable sorted label suffix, got %s", key)
 	}
 }
 
@@ -496,9 +482,8 @@ func TestManagerImplement_getMetricKey_WithSingleLabel(t *testing.T) {
 	}
 
 	key := manager.getMetricKey(metric)
-	expected := "serverId=server-001,"
-	if key != expected {
-		t.Errorf("expected %s, got %s", expected, key)
+	if !strings.Contains(key, "|serverId=server-001,") {
+		t.Errorf("expected key to include label suffix, got %s", key)
 	}
 }
 
@@ -646,6 +631,7 @@ func TestManagerImplement_SetP2POn_EnabledP2P_FirstRun(t *testing.T) {
 	serverList := []interfaces.ServerTargetList{
 		{
 			ServerID:      "server-001",
+			SystemID:      "system-001",
 			HostIPAddress: "192.168.1.100",
 			LoginUser:     "testuser",
 			P2PEnable:     true, // P2P enabled
@@ -674,6 +660,14 @@ func TestManagerImplement_SetP2POn_EnabledP2P_FirstRun(t *testing.T) {
 	// p2pSettingList should be updated
 	if len(manager.p2pSettingList) != 1 {
 		t.Errorf("expected 1 server in p2pSettingList, got %d", len(manager.p2pSettingList))
+	}
+
+	if len(mockMetrics.WrittenLabels) == 0 {
+		t.Fatal("expected at least one written metric label")
+	}
+
+	if got := mockMetrics.WrittenLabels[0]["systemId"]; got != "system-001" {
+		t.Errorf("expected systemId label to be system-001, got %q", got)
 	}
 }
 
@@ -774,6 +768,7 @@ func TestManagerImplement_SetP2POn_EnabledP2P_PowerONTransition(t *testing.T) {
 		p2pSettingList: []interfaces.ServerTargetList{
 			{
 				ServerID:      "server-001",
+				SystemID:      "system-001",
 				PowerON:       false, // Was Power OFF
 				UptimeSeconds: 0,
 			},
@@ -783,6 +778,7 @@ func TestManagerImplement_SetP2POn_EnabledP2P_PowerONTransition(t *testing.T) {
 	serverList := []interfaces.ServerTargetList{
 		{
 			ServerID:      "server-001",
+			SystemID:      "system-001",
 			HostIPAddress: "192.168.1.100",
 			LoginUser:     "testuser",
 			P2PEnable:     true,
@@ -837,6 +833,7 @@ func TestManagerImplement_SetP2POn_EnabledP2P_RebootDetection(t *testing.T) {
 		p2pSettingList: []interfaces.ServerTargetList{
 			{
 				ServerID:      "server-001",
+				SystemID:      "system-001",
 				PowerON:       true,
 				UptimeSeconds: 7200, // Previous uptime was higher (reboot detected)
 			},
@@ -846,6 +843,7 @@ func TestManagerImplement_SetP2POn_EnabledP2P_RebootDetection(t *testing.T) {
 	serverList := []interfaces.ServerTargetList{
 		{
 			ServerID:      "server-001",
+			SystemID:      "system-001",
 			HostIPAddress: "192.168.1.100",
 			LoginUser:     "testuser",
 			P2PEnable:     true,

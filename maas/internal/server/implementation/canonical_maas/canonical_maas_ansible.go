@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package canonical_maas
 
 import (
@@ -20,6 +6,7 @@ import (
 	"strings"
 	"os"
 	"path/filepath"
+	"time"
 
 	// import of gRPC protobuf
 	"maas_module/internal/server/utils"
@@ -50,7 +37,7 @@ func (r *CmdExecutor) ExecuteCommand(ctx context.Context, name string, arg ...st
 }
 
 // command execution
-func (l CanonicalMaasAnsibleImple) CmdExecute(ctx context.Context, remoteHost string, playbook string, extrArgs string) (output []byte, err error) {
+func (l CanonicalMaasAnsibleImple) CmdExecute(ctx context.Context, remoteHost string, playbook string, extrArgs string, retryCount ...int) (output []byte, err error) {
 	klog.V(2).InfoS("start CmdExecute", "remoteHost", remoteHost, "playbook", playbook, "extrArgs", extrArgs)
 	defer func() {
 		klog.V(2).InfoS("end CmdExecute", "output", output, "err", err)
@@ -81,10 +68,27 @@ func (l CanonicalMaasAnsibleImple) CmdExecute(ctx context.Context, remoteHost st
 	// generate ansible command
 	klog.InfoS("Ansible command generated", "cmd", strings.Join(args, " "))
 
-	// excetute ansible comamnd
-	output, err = l.Executor.ExecuteCommand(ctx, args[0], args[1:]...)
+	maxAttempts := 1
+	retryInterval := 2 * time.Second
+	if len(retryCount) > 0 && retryCount[0] > 1 {
+		maxAttempts = retryCount[0]
+	}
+
+	// execute ansible command
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		output, err = l.Executor.ExecuteCommand(ctx, args[0], args[1:]...)
+		if err == nil {
+			break
+		}
+
+		klog.V(2).InfoS("branch: command execution failed", "attempt", attempt, "maxAttempts", maxAttempts, "error", err.Error())
+		if attempt < maxAttempts {
+			time.Sleep(retryInterval)
+		}
+	}
+
 	if err != nil {
-		klog.V(2).InfoS("branch: command execution failed", "error", err.Error())
+		klog.V(2).InfoS("branch: command execution failed after retries", "maxAttempts", maxAttempts, "error", err.Error())
 
         // Extract meaningful error message from Ansible output
         var errorMessage string

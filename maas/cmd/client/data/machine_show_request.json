@@ -5,8 +5,8 @@
     "version": "3.6.2"
   },
   "maas_info": {
-    "access_url": "http://172.31.16.200:5240/MAAS/api/2.0/",
-    "api_key": "sRhC972UsMXH9VGdE5:72AAmD3vJrNDvRBRrT:FSgAxnQZVRYT6Sy8LrAu7ARv9pEMS64F"
+    "access_url": "http://192.168.2.200:5240/MAAS/api/2.0/",
+    "api_key": "DUMMYMAASAPIKEY001:DUMMYMAASAPIKEY002:DUMMYMAASAPIKEYPLACEHOLDER000001"
   },
   "system_id": "bx33hy"
 }

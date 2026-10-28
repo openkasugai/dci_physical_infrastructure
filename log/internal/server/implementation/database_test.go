@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package implementation
 
 import (
@@ -481,6 +467,14 @@ func TestDatabaseImplement_SelectCDITable_ProductTypeFiltering_ReturnsFilteredLi
 			},
 			map[string]interface{}{
 				"cdi_id":           "3",
+				"remote_host":      "192.168.1.20",
+				"remote_user":      "admin20",
+				"group_name":       "group1",
+				"product_info":     `{"vendor":"fujitsu","product_name":"PRIMERGY CDI","version":"2.0"}`,
+				"extra_parameters": `{"cdi_user":"user20","cdi_password":"pass20","cdi_guest":"192.168.10.20","cdimgr_guest_user":"guest20","cdimgr_guest_password":"gpass20","cdimgr_host":"10.0.0.20","cdimgr_host_user":"jump20"}`,
+			},
+			map[string]interface{}{
+				"cdi_id":           "4",
 				"remote_host":      "192.168.1.3",
 				"remote_user":      "admin",
 				"group_name":       "group1",
@@ -500,16 +494,18 @@ func TestDatabaseImplement_SelectCDITable_ProductTypeFiltering_ReturnsFilteredLi
 	// Execute SelectCDITable
 	targetList, err := dbImpl.SelectCDITable()
 
-	// Assertions - should only include PG-CDI v1.0 and v1.1, exclude unsupported product
+	// Assertions - should include supported PG-CDI versions and exclude unsupported product
 	assert.NoError(t, err)
-	assert.Equal(t, 2, len(targetList))
+	assert.Equal(t, 3, len(targetList))
 	assert.Equal(t, "192.168.1.1", targetList[0].CDIHost)
 	assert.Equal(t, "192.168.1.2", targetList[1].CDIHost)
+	assert.Equal(t, "192.168.1.20", targetList[2].CDIHost)
 	
 	// Verify new fields are populated
 	assert.Equal(t, "admin", targetList[0].CDIHostUser)
 	assert.Equal(t, "user1", targetList[0].CDISoftUser)
 	assert.Equal(t, "pass1", targetList[0].CDISoftPassword)
+	assert.Equal(t, "admin20", targetList[2].CDIHostUser)
 }
 
 // TestDatabaseImplement_SelectCDITable_InvalidExtraParameters_SkipsEntry tests invalid ExtraParameters handling

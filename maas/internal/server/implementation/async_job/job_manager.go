@@ -1,22 +1,10 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-package canonical_maas
+package async_job
 
 import (
 	"sync"
 	"time"
+
+	"k8s.io/klog/v2"
 )
 
 // JobType identifies the type of async job.
@@ -30,10 +18,13 @@ const (
 
 // JobInfo holds metadata for a single in-progress job.
 type JobInfo struct {
-	SystemID  string
-	Type      JobType
-	StartedAt time.Time
-	// K8sJobName string  // reserved for future k8s Job externalisation
+	SystemID   string
+	Type       JobType
+	StartedAt  time.Time
+	K8sJobName string
+	RequestID  string
+	TraceID    string
+	Payload    string
 }
 
 // JobStore is the persistence abstraction for job state.
@@ -52,6 +43,9 @@ type JobStore interface {
 
 	// ListJobs returns all jobs registered for the systemID.
 	ListJobs(systemID string) []JobInfo
+
+	// Cancel terminates active jobs for the given systemID.
+	Cancel(systemID string) error
 }
 
 /*
@@ -108,6 +102,13 @@ func (s *InMemoryJobStore) ListJobs(systemID string) []JobInfo {
 	return result
 }
 
+func (s *InMemoryJobStore) Cancel(systemID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.jobs, systemID)
+	return nil
+}
+
 /*
  * JobManager
  */
@@ -132,12 +133,56 @@ func NewInMemoryJobManager() *JobManager {
 	return sharedJobManager
 }
 
+// NewK8sJobManager creates a JobManager backed by K8sJobStore.
+// If initialisation fails, it falls back to an empty no-op store.
+func NewK8sJobManager(logger klog.Logger, options K8sJobStoreOptions) *JobManager {
+	store, err := NewK8sJobStore(options)
+	if err != nil {
+		logger.Error(err, "failed to initialize K8sJobStore, fallback to no-op store")
+		return NewJobManager(&NoopJobStore{})
+	}
+	return NewJobManager(store)
+}
+
+// NoopJobStore is a no-op implementation used when k8s initialisation fails.
+type NoopJobStore struct{}
+
+func (s *NoopJobStore) Register(systemID string, info JobInfo) error {
+	return nil
+}
+
+func (s *NoopJobStore) Deregister(systemID string, jobType JobType) {}
+
+func (s *NoopJobStore) HasJob(systemID string) bool {
+	return false
+}
+
+func (s *NoopJobStore) ListJobs(systemID string) []JobInfo {
+	return []JobInfo{}
+}
+
+func (s *NoopJobStore) Cancel(systemID string) error {
+	return nil
+}
+
 // Register registers a new in-progress job for the given systemID.
 func (j *JobManager) Register(systemID string, jobType JobType) {
 	_ = j.store.Register(systemID, JobInfo{
 		SystemID:  systemID,
 		Type:      jobType,
 		StartedAt: time.Now(),
+	})
+}
+
+// RegisterWithInfo registers a new in-progress job with additional metadata.
+func (j *JobManager) RegisterWithInfo(systemID string, jobType JobType, requestID string, traceID string, payload string) {
+	_ = j.store.Register(systemID, JobInfo{
+		SystemID:  systemID,
+		Type:      jobType,
+		StartedAt: time.Now(),
+		RequestID: requestID,
+		TraceID:   traceID,
+		Payload:   payload,
 	})
 }
 
@@ -154,4 +199,19 @@ func (j *JobManager) HasProcessingJob(systemID string) bool {
 	return j.store.HasJob(systemID)
 }
 
+// CancelJobs terminates active jobs for the given systemID.
+func (j *JobManager) CancelJobs(systemID string) error {
+	if j == nil {
+		return nil
+	}
+	return j.store.Cancel(systemID)
+}
 
+// IsK8sBacked returns true when the manager persists job state in Kubernetes Jobs.
+func (j *JobManager) IsK8sBacked() bool {
+	if j == nil {
+		return false
+	}
+	_, ok := j.store.(*K8sJobStore)
+	return ok
+}

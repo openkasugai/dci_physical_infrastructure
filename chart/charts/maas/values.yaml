@@ -1,7 +1,7 @@
 replicaCount: 1
 image:
   repository: maas
-  tag: 0.3.7
+  tag: 1.0.0
   pullPolicy: IfNotPresent
 config:
   logLevel: "2"
@@ -9,6 +9,8 @@ config:
   sshPrivateKeyPath: "/etc/ssh-keys/id_ed25519"
   vmHostDisk: 120
   lxdListenPort: 8443
+  maasApiRetryCount: 10
+  maasApiRetryIntervalSeconds: 5
 ssh:
   secretName: physical-infrastructure-ssh-keys
 service:

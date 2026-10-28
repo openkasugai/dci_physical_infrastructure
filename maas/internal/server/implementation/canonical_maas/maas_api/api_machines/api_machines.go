@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package api_machines
 
 import (
@@ -41,7 +27,7 @@ func (m *Machines) GET(ctx context.Context) (response_body.Resbody, error) {
 	}()
 
 	// execute API call to get machines
-	statusCode, data, err := m.API.APIExecute(ctx, "GET", "machines/", "")
+	statusCode, data, err := m.API.APIExecute(ctx, "GET", "machines/", "", m.WithRetry)
 	if err != nil {
 		klog.V(2).InfoS("branch: API execution failed", "error", err.Error())
 		return nil, err
@@ -128,7 +114,7 @@ func (m *Machines) POST(ctx context.Context, reqBody request_body.Reqbody) (resp
 	klog.V(2).InfoS("branch: API request body generated")
 
 	// execute API call to create a machine
-	statusCode, data, err := m.API.APIExecute(ctx, "POST", "machines/", apiReqBody)
+	statusCode, data, err := m.API.APIExecute(ctx, "POST", "machines/", apiReqBody, m.WithRetry)
 	if err != nil {
 		klog.V(2).InfoS("branch: API execution failed", "error", err.Error())
 		return nil, err
@@ -168,7 +154,7 @@ func (m *MachineSystemID) GET(ctx context.Context) (response_body.Resbody, error
 	}()
 
 	// execute API call to get machine details
-	statusCode, data, err := m.API.APIExecute(ctx, "GET", fmt.Sprintf("machines/%s/", m.SystemID), "")
+	statusCode, data, err := m.API.APIExecute(ctx, "GET", fmt.Sprintf("machines/%s/", m.SystemID), "", m.WithRetry)
 	if err != nil {
 		klog.V(2).InfoS("branch: API execution failed", "error", err.Error())
 		return nil, err
@@ -216,7 +202,7 @@ func (m *MachineSystemID) PUT(ctx context.Context, reqBody request_body.Reqbody)
 	apiReqBody := fmt.Sprintf("description=%s", url.QueryEscape(req.Description))
 
 	// execute API call to update a machine
-	statusCode, data, err := m.API.APIExecute(ctx, "PUT", fmt.Sprintf("machines/%s/", m.SystemID), apiReqBody)
+	statusCode, data, err := m.API.APIExecute(ctx, "PUT", fmt.Sprintf("machines/%s/", m.SystemID), apiReqBody, m.WithRetry)
 	if err != nil {
 		klog.V(2).InfoS("branch: API execution failed", "error", err.Error())
 		return nil, err
@@ -281,7 +267,7 @@ func (m *MachineSystemID) DELETE(ctx context.Context) (response_body.Resbody, er
 	}()
 
 	// execute API call to delete a machine
-	statusCode, data, err := m.API.APIExecute(ctx, "DELETE", fmt.Sprintf("machines/%s/", m.SystemID), "")
+	statusCode, data, err := m.API.APIExecute(ctx, "DELETE", fmt.Sprintf("machines/%s/", m.SystemID), "", m.WithRetry)
 	if err != nil {
 		klog.V(2).InfoS("branch: API execution failed", "error", err.Error())
 		return nil, err
@@ -322,7 +308,7 @@ func (m *MachineCommission) POST(ctx context.Context, reqBody request_body.Reqbo
 	klog.V(2).InfoS("branch: machine status allows commission", "systemID", m.SystemID, "status", status)
 
 	// execute API call to commission a machine
-	statusCode, data, err := m.API.APIExecute(ctx, "POST", fmt.Sprintf(`machines/%s/op-commission`, m.SystemID), "")
+	statusCode, data, err := m.API.APIExecute(ctx, "POST", fmt.Sprintf(`machines/%s/op-commission`, m.SystemID), "", m.WithRetry)
 	if err != nil {
 		klog.V(2).InfoS("branch: commission API execution failed", "error", err.Error())
 		return nil, err
@@ -382,7 +368,7 @@ func (m *MachineDeploy) POST(ctx context.Context, reqBody request_body.Reqbody) 
 	)
 
 	klog.V(2).InfoS("branch: deploying machine", "bridgeAll", req.BridgeAll)
-	statusCode, data, err := m.API.APIExecute(ctx, "POST", fmt.Sprintf("machines/%s/op-deploy", m.SystemID), apiReqBody)
+	statusCode, data, err := m.API.APIExecute(ctx, "POST", fmt.Sprintf("machines/%s/op-deploy", m.SystemID), apiReqBody, m.WithRetry)
 	if err != nil {
 		klog.V(2).InfoS("branch: deploy API execution failed", "error", err.Error())
 		return nil, err
@@ -432,7 +418,7 @@ func (m *MachineRelease) POST(ctx context.Context, reqBody request_body.Reqbody)
 
 	// execute API call to release a machine
 	apiReqBody := fmt.Sprintf("erase=%v&quick_erase=%v&secure_erase=%v", req.Erase, req.QuickErase, req.SecureErase)
-	statusCode, data, err := m.API.APIExecute(ctx, "POST", fmt.Sprintf("machines/%s/op-release", m.SystemID), apiReqBody)
+	statusCode, data, err := m.API.APIExecute(ctx, "POST", fmt.Sprintf("machines/%s/op-release", m.SystemID), apiReqBody, m.WithRetry)
 	if err != nil {
 		klog.V(2).InfoS("branch: release API execution failed", "error", err.Error())
 		return nil, err
@@ -458,7 +444,7 @@ func (m *MachineAbort) POST(ctx context.Context, reqBody request_body.Reqbody) (
 	}()
 
 	// execute API call to abort a machine operation
-	statusCode, data, err := m.API.APIExecute(ctx, "POST", fmt.Sprintf("machines/%s/op-abort", m.SystemID), "")
+	statusCode, data, err := m.API.APIExecute(ctx, "POST", fmt.Sprintf("machines/%s/op-abort", m.SystemID), "", m.WithRetry)
 	if err != nil {
 		klog.V(2).InfoS("branch: abort API execution failed", "error", err.Error())
 		return nil, err
@@ -513,7 +499,7 @@ func (m *MachineMarkBroken) POST(ctx context.Context, reqBody request_body.Reqbo
 	}
 
 	// execute API call to mark a machine as broken
-	statusCode, data, err := m.API.APIExecute(ctx, "POST", fmt.Sprintf("machines/%s/op-mark_broken", m.SystemID), apiReqBody)
+	statusCode, data, err := m.API.APIExecute(ctx, "POST", fmt.Sprintf("machines/%s/op-mark_broken", m.SystemID), apiReqBody, m.WithRetry)
 	if err != nil {
 		klog.V(2).InfoS("branch: mark broken API execution failed", "error", err.Error())
 		return nil, err
@@ -564,7 +550,7 @@ func (m *MachinePowerON) POST(ctx context.Context, reqBody request_body.Reqbody)
 	}
 
 	// execute API call to power-on a machine operation
-	statusCode, data, err := m.API.APIExecute(ctx, "POST", fmt.Sprintf("machines/%s/op-power_on", m.SystemID), apiReqBody)
+	statusCode, data, err := m.API.APIExecute(ctx, "POST", fmt.Sprintf("machines/%s/op-power_on", m.SystemID), apiReqBody, m.WithRetry)
 	if err != nil {
 		klog.V(2).InfoS("branch: power-on API execution failed", "error", err.Error())
 		return nil, err
@@ -603,7 +589,7 @@ func (m *MachinePowerOFF) POST(ctx context.Context, reqBody request_body.Reqbody
 	}
 
 	// execute API call to power-off a machine operation
-	statusCode, data, err := m.API.APIExecute(ctx, "POST", fmt.Sprintf("machines/%s/op-power_off", m.SystemID), "")
+	statusCode, data, err := m.API.APIExecute(ctx, "POST", fmt.Sprintf("machines/%s/op-power_off", m.SystemID), "", m.WithRetry)
 	if err != nil {
 		klog.V(2).InfoS("branch: power-off API execution failed", "error", err.Error())
 		return nil, err

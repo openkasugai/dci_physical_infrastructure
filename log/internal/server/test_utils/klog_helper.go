@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package test_utils
 
 import (
@@ -82,7 +68,8 @@ func SetupProductMappings() func() {
 		],
 		"cdi_products":[
 			{"vendor":"fujitsu","product_name":"PRIMERGY CDI","version":"1.1","type":"PG_CDI_1_1"},
-			{"vendor":"fujitsu","product_name":"PRIMERGY CDI","version":"1.0","type":"PG_CDI_1_0"}
+			{"vendor":"fujitsu","product_name":"PRIMERGY CDI","version":"1.0","type":"PG_CDI_1_0"},
+			{"vendor":"fujitsu","product_name":"PRIMERGY CDI","version":"2.0","type":"PG_CDI_2_0"}
 		],
 		"maas_products":[
 			{"vendor":"canonical","product_name":"MAAS","version":"3.6.2","type":"Canonical"}

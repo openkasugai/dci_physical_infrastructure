@@ -1,0 +1,32 @@
+- hosts: all
+  gather_facts: false
+
+  tasks:
+    - name: Get DHCP leases on jump host
+      become: true
+      command: virsh net-dhcp-leases default
+      register: lease_out
+      changed_when: false
+
+    - name: Output virsh net-dhcp-leases
+      debug:
+        msg: "{{ lease_out.stdout }}"
+        
+    - name: Extract first IP address from lease output safely
+      set_fact:
+        guest_ip: >-
+          {{
+            lease_out.stdout
+            | regex_findall('([0-9]+(?:[.][0-9]+){3})/[0-9]+')
+            | first
+            | default('', true)
+          }}
+
+    - name: Fail when Guest IP cannot be found
+      fail:
+        msg: "Guest IP not found in virsh lease table. stdout={{ lease_out.stdout }}"
+      when: guest_ip | length == 0
+
+    - name: result output
+      debug:
+        msg: "GUEST_IP={{ guest_ip }}"

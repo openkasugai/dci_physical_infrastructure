@@ -9,6 +9,21 @@
       failed_when: false
       changed_when: false
 
+    - name: check user_data apply status
+      shell: |
+        if [ -f /run/maas/user-data-apply.status ]; then
+          cat /run/maas/user-data-apply.status
+        else
+          echo unknown
+        fi
+      register: user_data_apply_result
+      failed_when: false
+      changed_when: false
+
     - name: output cloud-init status result
       debug:
         msg: "CLOUD_INIT_STATUS={{ cloud_init_result.stdout }}"
+
+    - name: output user_data apply status result
+      debug:
+        msg: "USER_DATA_APPLY_STATUS={{ user_data_apply_result.stdout }}"

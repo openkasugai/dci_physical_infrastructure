@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package implementation
 
 import (
@@ -279,16 +265,7 @@ func TestCDIImplement_parseMsg(t *testing.T) {
 				"category1 key1=value1",
 				"category2 key2=value2",
 			},
-			expected: `
-{
-  "category1": {
-    "key1": "value1"
-  },
-  "category2": {
-    "key2": "value2"
-  }
-}
-`,
+			expected: `{"category1":{"key1":"value1"},"category2":{"key2":"value2"}}`,
 			expectedErr: nil,
 		},
 		{
@@ -373,6 +350,103 @@ defer cleanupMappings()
 
 	// Clean up the environment variables
 	_ = os.Unsetenv("SSH_KEY")
+}
+
+func TestCDIImplement_Collection_PGCDI20_Success(t *testing.T) {
+	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
+	defer cleanup()
+	cleanupMappings := test_utils.SetupProductMappings()
+	defer cleanupMappings()
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockAnsible := NewMockAnsible(ctrl)
+	mockLogging := NewMockLogging(ctrl)
+	l := NewTestCDIImplement(mockAnsible, mockLogging)
+
+	_ = os.Setenv("SSH_KEY", "test_ssh_key")
+	defer os.Unsetenv("SSH_KEY")
+
+	targetList := []interfaces.CDITargetList{
+		{
+			CDIHost:     "192.168.1.10",
+			ProductInfo: `{"vendor":"fujitsu","product_name":"PRIMERGY CDI","version":"2.0"}`,
+			ExtraParameters: `{"cdi_guest":"guest20","cdimgr_guest_user":"guest_user20","cdimgr_guest_password":"guest_pass20","cdimgr_host":"10.0.0.10","cdimgr_host_user":"jump_user20","cdimgr_host_password":"host_pass20","director_password":"director_pass20"}`,
+		},
+	}
+
+	guestIPOutput := []interface{}{"GUEST_IP=192.168.122.100"}
+	hhOutput := []interface{}{"category1 key1=value1", "category2 key2=value2"}
+
+	mockAnsible.EXPECT().
+		CmdExecute(gomock.Any(), "10.0.0.10", "jump_user20", "cdi_get_guest_os_ip.yaml", "ansible_become_pass=host_pass20").
+		Return(guestIPOutput, nil)
+	mockAnsible.EXPECT().
+		CmdExecute(
+			gomock.Any(),
+			"192.168.122.100",
+			"guest_user20",
+			"cdi_hh.yaml",
+			"ansible_password=guest_pass20 ansible_ssh_common_args='-o ProxyCommand=\"ssh -i test_ssh_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -W %h:%p -q jump_user20@10.0.0.10\" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null' cdi_pass=host_pass20 director_pass=director_pass20",
+		).
+		Return(hhOutput, nil)
+
+	mockLogging.EXPECT().
+		Write("192.168.122.100", `{"category1":{"key1":"value1"},"category2":{"key2":"value2"}}`).
+		Return(nil)
+
+	l.Collection(targetList)
+}
+
+func TestCDIImplement_extractGuestIP(t *testing.T) {
+	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
+	defer cleanup()
+
+	l := &CDIImplement{Logger: klog.Background()}
+
+	testCases := []struct {
+		name        string
+		input       interface{}
+		expected    string
+		expectError string
+	}{
+		{
+			name:     "single string",
+			input:    "GUEST_IP=192.168.122.100",
+			expected: "192.168.122.100",
+		},
+		{
+			name:     "list of lines",
+			input:    []interface{}{"ok", "GUEST_IP=192.168.122.101"},
+			expected: "192.168.122.101",
+		},
+		{
+			name:        "unsupported format",
+			input:       123,
+			expectError: "invalid Guest IP response format",
+		},
+		{
+			name:        "missing value",
+			input:       []interface{}{"no ip here"},
+			expectError: "GUEST_IP not found in ansible result",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			guestIP, err := l.extractGuestIP(tc.input)
+
+			if tc.expectError != "" {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tc.expectError)
+				return
+			}
+
+			assert.NoError(t, err)
+			assert.Equal(t, tc.expected, guestIP)
+		})
+	}
 }
 
 // Helper function to set environment variable and return cleanup function for CDI tests

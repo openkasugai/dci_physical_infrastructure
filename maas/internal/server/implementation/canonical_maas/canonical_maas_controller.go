@@ -1,22 +1,10 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package canonical_maas
 
 import (
+	"crypto/sha1"
 	"context"
 	"encoding/json"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -28,10 +16,13 @@ import (
 	"time"
 
 	"google.golang.org/grpc/codes"
+	goproto "google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/encoding/protojson"
 	"k8s.io/klog/v2"
 
 	proto "maas_module/api/proto" // import for gRPC protobuf
-    common "common/api/proto"    // import of common protobuf
+	common "common/api/proto"    // import of common protobuf
+	"maas_module/internal/server/implementation/async_job"
 	"maas_module/internal/server/implementation/canonical_maas/maas_api/request_body"
 	"maas_module/internal/server/implementation/canonical_maas/maas_api/response_body"
 	"maas_module/internal/server/interfaces" // import of MaaS interface
@@ -56,7 +47,256 @@ type CanonicalMaasController struct {
 	Logger     klog.Logger
 	Ansible    interfaces.MaasAnsible
 	APIFactory maas_api.MaasAPIFactory
-	JobManager *JobManager
+	JobManager *async_job.JobManager
+}
+
+func isWorkerMode() bool {
+	return os.Getenv("MAAS_RUN_MODE") == "worker"
+}
+
+func marshalAsyncPayload(msg goproto.Message) string {
+	b, err := protojson.Marshal(msg)
+	if err != nil {
+		klog.V(2).InfoS("failed to marshal async payload", "error", err)
+		return ""
+	}
+	return string(b)
+}
+
+func buildAsyncRequestID(jobType async_job.JobType, systemID string, payload string) string {
+	base := payload
+	if strings.TrimSpace(base) == "" {
+		base = fmt.Sprintf("%s|%s", jobType, systemID)
+	}
+	sum := sha1.Sum([]byte(string(jobType) + "|" + systemID + "|" + base))
+	return hex.EncodeToString(sum[:])[:12]
+}
+
+func (l CanonicalMaasController) runMachineRegisterAsyncFlow(ctx context.Context, in *proto.MachineRegisterRequest, systemID string) {
+	// commission.
+	err := l.internalCommission(ctx, systemID, true)
+	if err != nil {
+		klog.V(2).InfoS("branch: commission failed", "systemID", systemID, "error", err)
+		l.markBroken(ctx, err, systemID)
+		return
+	}
+
+	// get subnet list
+	subnets, err := l.getSubnetList(ctx, true)
+	if err != nil {
+		klog.V(2).InfoS("branch: get subnet list failed", "systemID", systemID, "error", err)
+		l.markBroken(ctx, err, systemID)
+		return
+	}
+
+	// keep subnetID and mac address associated
+	macToSubnet := make(map[string]SubnetLinkPair)
+
+	// keep fabric_id and mac address associated
+	macToFabric := make(map[string]FabricPair)
+
+	// get machine access information
+	_, _, _, bootMac, bootSubnets, _, _, _, err := l.getMachineAccessInfo(ctx, systemID, true)
+	if err != nil {
+		klog.V(2).InfoS("branch: get machine access info failed", "systemID", systemID, "error", err)
+		l.markBroken(ctx, err, systemID)
+		return
+	}
+	macToSubnet[strings.ToLower(bootMac)] = SubnetLinkPair{subnetIds: bootSubnets, linkMode: "AUTO"}
+
+	// loop for network infomations
+	mac2name := make(map[string]string)
+	seenMacs := make(map[string]bool)
+	ethIdx := 0
+	for i := 0; i < len(in.GetNetworkInformation()); i++ {
+		klog.V(2).InfoS("Processing network information", "systemID", systemID, "index", i, "macAddress", in.GetNetworkInformation()[i].GetMacAddress())
+
+		inCidr := in.GetNetworkInformation()[i].GetCidr()
+		inAddrStart := in.GetNetworkInformation()[i].GetAddressStart()
+		inAddrEnd := in.GetNetworkInformation()[i].GetAddressEnd()
+		macAddr := in.GetNetworkInformation()[i].GetMacAddress()
+
+		// find subnet
+		matchID := l.findSubnet(subnets, inCidr)
+
+		var subnetID int
+		if matchID == nil {
+			klog.V(2).InfoS("branch: subnet not found, creating new subnet", "systemID", systemID, "cidr", inCidr)
+			// create subnet and ip range
+			id, e := l.createSubnetAndIPRange(ctx, macToFabric, macAddr, inCidr, inAddrStart, inAddrEnd, true)
+			if e != nil {
+				klog.V(2).InfoS("branch: create subnet failed", "systemID", systemID, "cidr", inCidr, "error", e)
+				l.markBroken(ctx, e, systemID)
+				return
+			}
+			subnetID = id
+			subnets = append(subnets, response_body.Subnet {
+				Cidr: inCidr,
+				ID: id,
+			})
+		} else {
+			klog.V(2).InfoS("branch: subnet found", "systemID", systemID, "cidr", inCidr, "subnetID", *matchID)
+			subnetID = *matchID
+		}
+
+		// save subnetID and mac address associated
+		existingPair := macToSubnet[strings.ToLower(macAddr)]
+		isDuplicate := false
+		for _, existingSubnetID := range existingPair.subnetIds {
+			if existingSubnetID == subnetID {
+				isDuplicate = true
+				klog.V(2).InfoS("subnet already linked to MAC, skipping duplicate",
+					"macAddress", macAddr, "subnetID", subnetID)
+				break
+			}
+		}
+		if !isDuplicate {
+			macToSubnet[strings.ToLower(macAddr)] = SubnetLinkPair{
+				subnetIds: append(existingPair.subnetIds, subnetID),
+				linkMode: "AUTO",
+			}
+		}
+
+		// build mac2name map: NetworkInformation order -> eth{i}
+		macLower := strings.ToLower(macAddr)
+		if !seenMacs[macLower] {
+			mac2name[macLower] = fmt.Sprintf("eth%d", ethIdx)
+			seenMacs[macLower] = true
+			ethIdx++
+		}
+	}
+
+	// get interface list.
+	interfaces, err := l.getInterfaceList(ctx, systemID, true)
+	if err != nil {
+		klog.V(2).InfoS("branch: get interface list failed", "systemID", systemID, "error", err)
+		l.markBroken(ctx, err, systemID)
+		return
+	}
+
+	// link interface to subnet (and rename per mac2name)
+	err = l.linkSubnetInterface(ctx, systemID, interfaces, macToSubnet, "MacAddress", false, mac2name, true)
+	if err != nil {
+		klog.V(2).InfoS("branch: link subnet interface failed", "systemID", systemID, "error", err)
+		l.markBroken(ctx, err, systemID)
+		return
+	}
+}
+
+func (l CanonicalMaasController) runVMComposeAsyncFlow(ctx context.Context, systemID string, nameToSubnet map[string]SubnetLinkPair) {
+	// status polling
+	pollingInterval := 10 * time.Second
+	klog.V(2).InfoS("starting machine status polling", "systemID", systemID, "interval", pollingInterval)
+	err := l.pollingMachineStatus(ctx, systemID, pollingInterval, []string{"Ready", "Failed commissioning"}, true)
+	if err != nil {
+		klog.V(2).InfoS("branch: machine status polling failed", "systemID", systemID, "error", err)
+		l.markBroken(ctx, err, systemID)
+		return
+	}
+
+	// get interface list.
+	klog.V(2).InfoS("getting interface list", "systemID", systemID)
+	interfaceList, err := l.getInterfaceList(ctx, systemID, true)
+	if err != nil {
+		klog.V(2).InfoS("branch: get interface list failed", "systemID", systemID, "error", err)
+		l.markBroken(ctx, err, systemID)
+		return
+	}
+
+	// link interface to subnet (rename not required for VMCompose)
+	klog.V(2).InfoS("linking interfaces to subnets", "systemID", systemID)
+	err = l.linkSubnetInterface(ctx, systemID, interfaceList, nameToSubnet, "Name", true, nil, true)
+	if err != nil {
+		klog.V(2).InfoS("branch: link subnet interface failed", "systemID", systemID, "error", err)
+		l.markBroken(ctx, err, systemID)
+		return
+	}
+}
+
+func (l CanonicalMaasController) runKubeadmJoinAsyncFlow(ctx context.Context, in *proto.KubeadmJoinRequest, systemID string, workerAccessAddress string) {
+	cpSystemIDs := in.GetCpSystemId()
+	klog.V(2).InfoS("starting async kubeadm join process", "systemID", systemID, "cpSystemIDs", cpSystemIDs, "contextStatus", ctx.Err())
+
+	// loop for control plane system IDs
+	joinCommand := ""
+	for _, cpSystemID := range cpSystemIDs {
+
+		// get control plane machine access information
+		klog.V(2).InfoS("getting control plane machine access information", "cpSystemID", cpSystemID)
+		_, _, cpAccessAddress, _, _, _, _, _, err := l.getMachineAccessInfo(ctx, cpSystemID, true)
+		if err != nil {
+			klog.V(2).InfoS("branch: get control plane machine access info failed", "cpSystemID", cpSystemID, "error", err)
+			continue // try next control plane
+		}
+
+		// execute kubeadm token create on control plane to get join command
+		klog.V(2).InfoS("generating join token on control plane", "cpSystemID", cpSystemID, "cpAccessAddress", cpAccessAddress, "contextStatus", ctx.Err())
+		tokenOutput, err := l.Ansible.CmdExecute(ctx, cpAccessAddress, "kubeadm_token_create.yaml", "", 5)
+		if err != nil {
+			klog.V(2).InfoS("branch: kubeadm token create failed", "cpSystemID", cpSystemID, "error", err)
+			continue // try next control plane
+		}
+
+		// parse join command from ansible output
+		// Ansible debug output wraps the message value in JSON quotes:
+		//   ok: [host] => {
+		//       "msg": "KUBEADM_JOIN_COMMAND=kubeadm join ..."
+		//   }
+		// After SplitN on "KUBEADM_JOIN_COMMAND=", parts[1] ends with `"` (JSON closing quote).
+		// Use TrimSuffix to remove exactly that trailing `"` without touching the command value.
+		tokenStr := string(tokenOutput)
+		lines := strings.Split(tokenStr, "\n")
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			// First try to find the marked output
+			if strings.Contains(trimmed, "KUBEADM_JOIN_COMMAND=") {
+				parts := strings.SplitN(trimmed, "KUBEADM_JOIN_COMMAND=", 2)
+				if len(parts) == 2 {
+					// Strip the trailing `"` from Ansible's JSON debug output format
+					candidate := strings.TrimSuffix(strings.TrimSpace(parts[1]), `"`)
+					if strings.HasPrefix(candidate, "kubeadm join") {
+						joinCommand = candidate
+						break
+					}
+				}
+			}
+			// Fallback: look for direct kubeadm join command
+			if joinCommand == "" && strings.HasPrefix(trimmed, "kubeadm join") {
+				joinCommand = trimmed
+			}
+		}
+		if joinCommand == "" {
+			klog.V(2).InfoS("branch: join command not found in output", "error", err, "output", tokenStr)
+			continue // try next control plane
+		} else {
+			// join command found, break the loop
+			break
+		}
+	}
+
+	if joinCommand == "" {
+		klog.V(2).InfoS("branch: failed to extract join command from any control plane")
+		err := errors.New("failed to extract join command from control plane output")
+		l.markBroken(ctx, err, systemID)
+		return
+	}
+
+	klog.V(2).InfoS("extracted join command", "joinCommand", joinCommand)
+
+	// prepare extra-vars for ansible with join command and node-ip
+	// Use JSON format to safely handle special characters in the join command
+	extraVarsBytes, _ := json.Marshal(map[string]string{"join_command": joinCommand, "node_ip": in.GetNodeIp()})
+	extra := string(extraVarsBytes)
+
+	// execute kubeadm join on worker node via ansible
+	_, err := l.Ansible.CmdExecute(ctx, workerAccessAddress, "kubeadm_join.yaml", extra, 5)
+	if err != nil {
+		klog.V(2).InfoS("branch: kubeadm join failed", "systemID", systemID, "error", err)
+		l.markBroken(ctx, err, systemID)
+		return
+	}
+
+	klog.V(2).InfoS("kubeadm join completed successfully", "systemID", systemID)
 }
 
 /**********************************
@@ -173,13 +413,13 @@ func (l CanonicalMaasController) internalMachineRegister(ctx context.Context, in
 }
 
 // commission internal
-func (l CanonicalMaasController) internalCommission(ctx context.Context, systemID string) (err error) {
+func (l CanonicalMaasController) internalCommission(ctx context.Context, systemID string, withRetry bool) (err error) {
 	klog.V(2).InfoS("start internalCommission", "systemID", systemID)
 	defer func() {
 		klog.V(2).InfoS("end internalCommission", "err", err)
 	}()
 
-	_, err = l.APIFactory.NewMachineCommission(systemID).POST(ctx, nil)
+	_, err = l.APIFactory.NewMachineCommission(systemID, withRetry).POST(ctx, nil)
 	if err != nil {
 		klog.V(2).InfoS("branch: commission POST API failed", "systemID", systemID, "error", err)
 		return
@@ -189,7 +429,7 @@ func (l CanonicalMaasController) internalCommission(ctx context.Context, systemI
 
 	// status polling
 	pollingInterval := 10 * time.Second
-	err = l.pollingMachineStatus(ctx, systemID, pollingInterval, []string{"Ready", "Failed commissioning"})
+	err = l.pollingMachineStatus(ctx, systemID, pollingInterval, []string{"Ready", "Failed commissioning"}, withRetry)
 	if err != nil {
 		klog.V(2).InfoS("branch: commission polling failed", "systemID", systemID, "error", err)
 		return
@@ -200,7 +440,7 @@ func (l CanonicalMaasController) internalCommission(ctx context.Context, systemI
 }
 
 // machine status polling
-func (l CanonicalMaasController) pollingMachineStatus(ctx context.Context, systemID string, pollingInterval time.Duration, checkStatus []string) (err error) {
+func (l CanonicalMaasController) pollingMachineStatus(ctx context.Context, systemID string, pollingInterval time.Duration, checkStatus []string, withRetry bool) (err error) {
 	klog.V(2).InfoS("start pollingMachineStatus", "systemID", systemID, "pollingInterval", pollingInterval, "checkStatus", checkStatus)
 	defer func() {
 		klog.V(2).InfoS("end pollingMachineStatus", "err", err)
@@ -211,7 +451,7 @@ func (l CanonicalMaasController) pollingMachineStatus(ctx context.Context, syste
 		// execute machine show
 		_, status, _, err = l.internalMachineShow(ctx, &proto.MachineShowRequest{
 			SystemId: systemID,
-		})
+		}, withRetry)
 		if err != nil {
 			klog.V(2).InfoS("branch: machine show failed during polling", "systemID", systemID, "error", err)
 			return
@@ -236,14 +476,14 @@ func (l CanonicalMaasController) pollingMachineStatus(ctx context.Context, syste
 }
 
 // get Subnet list
-func (l CanonicalMaasController) getSubnetList(ctx context.Context) (subnets []response_body.Subnet, err error) {
+func (l CanonicalMaasController) getSubnetList(ctx context.Context, withRetry bool) (subnets []response_body.Subnet, err error) {
 	klog.V(2).InfoS("start getSubnetList")
 	defer func() {
 		klog.V(2).InfoS("end getSubnetList", "subnets", subnets, "err", err)
 	}()
 
 	// get Subnet list.
-	res, err := l.APIFactory.NewSubnets().GET(ctx)
+	res, err := l.APIFactory.NewSubnets(withRetry).GET(ctx)
 	if err != nil {
 		klog.V(2).InfoS("branch: subnets GET API failed", "error", err)
 		return
@@ -285,7 +525,7 @@ func (l CanonicalMaasController) findSubnet(subnets []response_body.Subnet, cidr
 }
 
 // create subnet and ip range
-func (l CanonicalMaasController) createSubnetAndIPRange(ctx context.Context, macToFabric map[string]FabricPair, mac string, cidr string, addStart string, addEnd string) (subnetID int, err error) {
+func (l CanonicalMaasController) createSubnetAndIPRange(ctx context.Context, macToFabric map[string]FabricPair, mac string, cidr string, addStart string, addEnd string, withRetry bool) (subnetID int, err error) {
 	klog.V(2).InfoS("start createSubnetAndIPRange", "macToFabric", macToFabric, "mac", mac, "cidr", cidr, "addStart", addStart, "addEnd", addEnd)
 	defer func() {
 		klog.V(2).InfoS("end createSubnetAndIPRange", "subnetID", subnetID, "err", err)
@@ -297,7 +537,7 @@ func (l CanonicalMaasController) createSubnetAndIPRange(ctx context.Context, mac
 		klog.V(2).InfoS("branch: fabric not found for MAC, creating new fabric", "mac", mac)
 		// Create fabric
 		var res response_body.Resbody
-		res, err = l.APIFactory.NewFabrics().POST(ctx, nil)
+		res, err = l.APIFactory.NewFabrics(withRetry).POST(ctx, nil)
 		if err != nil {
 			klog.V(2).InfoS("branch: fabric creation failed", "mac", mac, "error", err)
 			return
@@ -329,7 +569,7 @@ func (l CanonicalMaasController) createSubnetAndIPRange(ctx context.Context, mac
 		Vid:      vlanID,
 	}
 	klog.V(2).InfoS("creating subnet", "cidr", cidr, "fabID", fabID, "vlanID", vlanID)
-	res, err := l.APIFactory.NewSubnets().POST(ctx, reqBody)
+	res, err := l.APIFactory.NewSubnets(withRetry).POST(ctx, reqBody)
 	if err != nil {
 		klog.V(2).InfoS("branch: subnet creation failed", "cidr", cidr, "error", err)
 		return
@@ -361,7 +601,7 @@ func (l CanonicalMaasController) createSubnetAndIPRange(ctx context.Context, mac
 				EndIP:    ipRanges[i][1],
 				Type:     "dynamic",
 			}
-			_, err = l.APIFactory.NewIPRanges().POST(ctx, reqBody)
+			_, err = l.APIFactory.NewIPRanges(withRetry).POST(ctx, reqBody)
 			if err != nil {
 				return
 			}
@@ -372,7 +612,7 @@ func (l CanonicalMaasController) createSubnetAndIPRange(ctx context.Context, mac
 }
 
 // get Interface list
-func (l CanonicalMaasController) getInterfaceList(ctx context.Context, systemID string) (interfaces []response_body.Interface, err error) {
+func (l CanonicalMaasController) getInterfaceList(ctx context.Context, systemID string, withRetry bool) (interfaces []response_body.Interface, err error) {
 	klog.V(2).InfoS("start getInterfaceList", "systemID", systemID)
 	defer func() {
 		klog.V(2).InfoS("end getInterfaceList", "interfaces", interfaces, "err", err)
@@ -380,7 +620,7 @@ func (l CanonicalMaasController) getInterfaceList(ctx context.Context, systemID 
 
 	// get interface list.
 	klog.V(2).InfoS("getting interfaces from API", "systemID", systemID)
-	res, err := l.APIFactory.NewInterfaces(systemID).GET(ctx)
+	res, err := l.APIFactory.NewInterfaces(systemID, withRetry).GET(ctx)
 	if err != nil {
 		klog.V(2).InfoS("branch: get interfaces API call failed", "systemID", systemID, "error", err)
 		return
@@ -398,10 +638,49 @@ func (l CanonicalMaasController) getInterfaceList(ctx context.Context, systemID 
 	return
 }
 
+func normalizeSubnetIDList(ids []int) []int {
+	seen := make(map[int]bool, len(ids))
+	result := make([]int, 0, len(ids))
+	for _, id := range ids {
+		if id <= 0 || seen[id] {
+			continue
+		}
+		seen[id] = true
+		result = append(result, id)
+	}
+	return result
+}
+
+func subnetIDSetFromLinks(links []response_body.Link) []int {
+	ids := make([]int, 0, len(links))
+	for _, link := range links {
+		ids = append(ids, link.Subnet.ID)
+	}
+	return normalizeSubnetIDList(ids)
+}
+
+func sameSubnetIDSet(a []int, b []int) bool {
+	aNorm := normalizeSubnetIDList(a)
+	bNorm := normalizeSubnetIDList(b)
+	if len(aNorm) != len(bNorm) {
+		return false
+	}
+	bucket := make(map[int]bool, len(aNorm))
+	for _, id := range aNorm {
+		bucket[id] = true
+	}
+	for _, id := range bNorm {
+		if !bucket[id] {
+			return false
+		}
+	}
+	return true
+}
+
 // linking subnet and interface
 // mac2name is an optional map from lower-cased MAC address to desired interface name (e.g. "eth0").
 // When non-nil, each matched interface is renamed after linking. Pass nil to skip renaming (e.g. VMCompose).
-func (l CanonicalMaasController) linkSubnetInterface(ctx context.Context, systemID string, interfaces []response_body.Interface, key2sub map[string]SubnetLinkPair, keyName string, caseSensitivity bool, mac2name map[string]string) (err error) {
+func (l CanonicalMaasController) linkSubnetInterface(ctx context.Context, systemID string, interfaces []response_body.Interface, key2sub map[string]SubnetLinkPair, keyName string, caseSensitivity bool, mac2name map[string]string, withRetry bool) (err error) {
 	klog.V(2).InfoS("start linkSubnetInterface", "systemID", systemID, "interfaces", interfaces, "key2sub", key2sub, "keyName", keyName, "caseSensitivity", caseSensitivity)
 	defer func() {
 		klog.V(2).InfoS("end linkSubnetInterface", "err", err)
@@ -426,26 +705,36 @@ func (l CanonicalMaasController) linkSubnetInterface(ctx context.Context, system
 		}
 
 		klog.V(2).InfoS("processing interface", "systemID", systemID, "interfaceIndex", i, "interfaceName", iface.Name, "interfaceID", iface.ID, "subnetCount", len(subnetPair.subnetIds))
+		desiredSubnetIDs := normalizeSubnetIDList(subnetPair.subnetIds)
+		currentSubnetIDs := subnetIDSetFromLinks(iface.Links)
 
-		// op-disconnect
-		klog.V(2).InfoS("disconnecting interface", "systemID", systemID, "interfaceID", iface.ID)
-		_, err = l.APIFactory.NewInterfaceDisconnect(systemID, iface.ID).POST(ctx, nil)
-		if err != nil {
-			klog.V(2).InfoS("branch: interface disconnect failed", "systemID", systemID, "interfaceID", iface.ID, "error", err)
-			return
-		}
-
-		// link subnet.
-		for j, subnetID := range subnetPair.subnetIds {
-			reqBody := request_body.ReqbodyIFLinkSubnet{
-				Mode:     subnetPair.linkMode,
-				SubnetID: subnetID,
-			}
-			klog.V(2).InfoS("linking interface to subnet", "systemID", systemID, "interfaceID", iface.ID, "subnetIndex", j, "subnetID", subnetID, "mode", subnetPair.linkMode)
-			_, err = l.APIFactory.NewInterfaceLink(systemID, iface.ID).POST(ctx, reqBody)
+		if sameSubnetIDSet(currentSubnetIDs, desiredSubnetIDs) {
+			klog.V(2).InfoS("interface links already match desired state, skipping link operations",
+				"systemID", systemID,
+				"interfaceID", iface.ID,
+				"currentSubnetIDs", currentSubnetIDs,
+				"desiredSubnetIDs", desiredSubnetIDs)
+		} else {
+			// op-disconnect
+			klog.V(2).InfoS("disconnecting interface", "systemID", systemID, "interfaceID", iface.ID)
+			_, err = l.APIFactory.NewInterfaceDisconnect(systemID, iface.ID, withRetry).POST(ctx, nil)
 			if err != nil {
-				klog.V(2).InfoS("branch: interface link to subnet failed", "systemID", systemID, "interfaceID", iface.ID, "subnetID", subnetID, "error", err)
+				klog.V(2).InfoS("branch: interface disconnect failed", "systemID", systemID, "interfaceID", iface.ID, "error", err)
 				return
+			}
+
+			// link subnet.
+			for j, subnetID := range desiredSubnetIDs {
+				reqBody := request_body.ReqbodyIFLinkSubnet{
+					Mode:     subnetPair.linkMode,
+					SubnetID: subnetID,
+				}
+				klog.V(2).InfoS("linking interface to subnet", "systemID", systemID, "interfaceID", iface.ID, "subnetIndex", j, "subnetID", subnetID, "mode", subnetPair.linkMode)
+				_, err = l.APIFactory.NewInterfaceLink(systemID, iface.ID, withRetry).POST(ctx, reqBody)
+				if err != nil {
+					klog.V(2).InfoS("branch: interface link to subnet failed", "systemID", systemID, "interfaceID", iface.ID, "subnetID", subnetID, "error", err)
+					return
+				}
 			}
 		}
 
@@ -455,7 +744,7 @@ func (l CanonicalMaasController) linkSubnetInterface(ctx context.Context, system
 			if newName, ok := mac2name[macLower]; ok {
 				if iface.Name != newName {
 					klog.V(2).InfoS("renaming interface", "systemID", systemID, "interfaceID", iface.ID, "currentName", iface.Name, "newName", newName)
-					_, err = l.APIFactory.NewInterfaceUpdate(systemID, iface.ID).PUT(ctx, request_body.ReqbodyInterfaceUpdate{Name: newName})
+					_, err = l.APIFactory.NewInterfaceUpdate(systemID, iface.ID, withRetry).PUT(ctx, request_body.ReqbodyInterfaceUpdate{Name: newName})
 					if err != nil {
 						klog.V(2).InfoS("branch: interface rename failed", "systemID", systemID, "interfaceID", iface.ID, "newName", newName, "error", err)
 						return
@@ -473,7 +762,7 @@ func (l CanonicalMaasController) linkSubnetInterface(ctx context.Context, system
 }
 
 // get host list
-func (l CanonicalMaasController) getHostList(ctx context.Context) (hosts []response_body.VMHost, err error) {
+func (l CanonicalMaasController) getHostList(ctx context.Context, withRetry bool) (hosts []response_body.VMHost, err error) {
 	klog.V(2).InfoS("start getHostList")
 	defer func() {
 		klog.V(2).InfoS("end getHostList", "hosts", hosts, "err", err)
@@ -481,7 +770,7 @@ func (l CanonicalMaasController) getHostList(ctx context.Context) (hosts []respo
 
 	// get host list.
 	klog.V(2).InfoS("getting VM hosts from API")
-	res, err := l.APIFactory.NewVMHosts().GET(ctx)
+	res, err := l.APIFactory.NewVMHosts(withRetry).GET(ctx)
 	if err != nil {
 		klog.V(2).InfoS("branch: get VM hosts API call failed", "error", err)
 		return
@@ -502,7 +791,7 @@ func (l CanonicalMaasController) getHostList(ctx context.Context) (hosts []respo
 }
 
 // get host id
-func (l CanonicalMaasController) getHostID(ctx context.Context, systemID string) (hostID int, err error) {
+func (l CanonicalMaasController) getHostID(ctx context.Context, systemID string, withRetry bool) (hostID int, err error) {
 	klog.V(2).InfoS("start getHostID", "systemID", systemID)
 	defer func() {
 		klog.V(2).InfoS("end getHostID", "hostID", hostID, "err", err)
@@ -510,7 +799,7 @@ func (l CanonicalMaasController) getHostID(ctx context.Context, systemID string)
 
 	// get vmhosts list.
 	klog.V(2).InfoS("getting host list", "systemID", systemID)
-	hosts, err := l.getHostList(ctx)
+	hosts, err := l.getHostList(ctx, withRetry)
 	if err != nil {
 		klog.V(2).InfoS("branch: get host list failed", "systemID", systemID, "error", err)
 		return
@@ -539,7 +828,7 @@ func (l CanonicalMaasController) getHostID(ctx context.Context, systemID string)
 }
 
 // machine show internal
-func (l CanonicalMaasController) internalMachineShow(ctx context.Context, in *proto.MachineShowRequest) (jsonStr string, machineStatus string, description string, err error) {
+func (l CanonicalMaasController) internalMachineShow(ctx context.Context, in *proto.MachineShowRequest, withRetry bool) (jsonStr string, machineStatus string, description string, err error) {
 	klog.V(2).InfoS("start internalMachineShow", "in", in)
 	defer func() {
 		klog.V(2).InfoS("end internalMachineShow", "jsonStr", jsonStr, "machineStatus", machineStatus, "description", description, "err", err)
@@ -547,7 +836,7 @@ func (l CanonicalMaasController) internalMachineShow(ctx context.Context, in *pr
 
 	// API execute
 	klog.V(2).InfoS("getting machine details from API", "systemID", in.GetSystemId())
-	res, err := l.APIFactory.NewMachineSystemID(in.GetSystemId()).GET(ctx)
+	res, err := l.APIFactory.NewMachineSystemID(in.GetSystemId(), withRetry).GET(ctx)
 	if err != nil {
 		klog.V(2).InfoS("branch: get machine API call failed", "systemID", in.GetSystemId(), "error", err)
 		return
@@ -578,7 +867,7 @@ func (l CanonicalMaasController) internalMachineShow(ctx context.Context, in *pr
 }
 
 // get machine access information
-func (l CanonicalMaasController) getMachineAccessInfo(ctx context.Context, systemID string) (
+func (l CanonicalMaasController) getMachineAccessInfo(ctx context.Context, systemID string, withRetry bool) (
 	hostName string, bootIf string, accessAddress string, bootMacAddress string, subnetIDs []int, storage float64, status string, powerStatus string, err error) {
 	klog.V(2).InfoS("start getMachineAccessInfo", "systemID", systemID)
 	defer func() {
@@ -587,7 +876,7 @@ func (l CanonicalMaasController) getMachineAccessInfo(ctx context.Context, syste
 
 	// API execute
 	klog.V(2).InfoS("getting machine details for access info", "systemID", systemID)
-	res, err := l.APIFactory.NewMachineSystemID(systemID).GET(ctx)
+	res, err := l.APIFactory.NewMachineSystemID(systemID, withRetry).GET(ctx)
 	if err != nil {
 		klog.V(2).InfoS("branch: get machine API call failed", "systemID", systemID, "error", err)
 		return
@@ -700,16 +989,59 @@ func (l CanonicalMaasController) isCloudInitDone(ctx context.Context, accessAddr
 		klog.V(2).InfoS("branch: cloud-init status check failed", "accessAddress", accessAddress, "error", err)
 		return false
 	}
-	for _, line := range strings.Split(string(output), "\n") {
+	parseStatus := func(line string, key string) (string, bool) {
 		trimmed := strings.TrimSpace(line)
-		if strings.Contains(trimmed, "CLOUD_INIT_STATUS=") {
-			parts := strings.SplitN(trimmed, "CLOUD_INIT_STATUS=", 2)
-			if len(parts) == 2 {
-				return strings.Contains(parts[1], "done")
-			}
+		if !strings.Contains(trimmed, key) {
+			return "", false
+		}
+		parts := strings.SplitN(trimmed, key, 2)
+		if len(parts) != 2 {
+			return "", false
+		}
+		value := strings.TrimSpace(parts[1])
+		value = strings.Trim(value, `"'}`)
+		return strings.ToLower(value), true
+	}
+
+	cloudStatus := ""
+	userApplyStatus := ""
+	for _, line := range strings.Split(string(output), "\n") {
+		if status, ok := parseStatus(line, "CLOUD_INIT_STATUS="); ok {
+			cloudStatus = status
+		}
+		if status, ok := parseStatus(line, "USER_DATA_APPLY_STATUS="); ok {
+			userApplyStatus = status
 		}
 	}
-	return false
+	cloudDone := strings.Contains(cloudStatus, "done")
+
+	// Backward compatibility: if USER_DATA_APPLY_STATUS is not printed,
+	// or explicitly unknown (status file not present), keep the legacy
+	// behavior based on CLOUD_INIT_STATUS only.
+	if userApplyStatus == "" || userApplyStatus == "unknown" {
+		return cloudDone
+	}
+	return userApplyStatus == "done" && cloudDone
+}
+
+func (l CanonicalMaasController) isSSHReachableConsecutive(ctx context.Context, accessAddress string, checks int, interval time.Duration) bool {
+	if checks <= 0 {
+		checks = 1
+	}
+	for i := 1; i <= checks; i++ {
+		if ctx.Err() != nil {
+			klog.V(2).InfoS("branch: SSH consecutive check canceled", "accessAddress", accessAddress, "check", i, "error", ctx.Err())
+			return false
+		}
+		if !l.isSSHReachable(ctx, accessAddress, 5*time.Second) {
+			klog.V(2).InfoS("branch: SSH consecutive check failed", "accessAddress", accessAddress, "check", i, "checks", checks)
+			return false
+		}
+		if i < checks {
+			time.Sleep(interval)
+		}
+	}
+	return true
 }
 
 // getReadyStatus computes the ready_status for a machine following the defined flow:
@@ -719,7 +1051,7 @@ func (l CanonicalMaasController) isCloudInitDone(ctx context.Context, accessAddr
 //   - Other:    "Processing"
 func (l CanonicalMaasController) getReadyStatus(ctx context.Context, systemID string, statusName string, powerStatus string, accessAddress string) (readyStatus string) {
 	klog.V(2).InfoS("start getReadyStatus", "systemID", systemID, "statusName", statusName, "powerStatus", powerStatus, "accessAddress", accessAddress)
-	hasJob := l.JobManager != nil && l.JobManager.HasProcessingJob(systemID)
+	hasJob := l.JobManager.HasProcessingJob(systemID)
 	klog.V(2).InfoS("job check completed", "systemID", systemID, "hasJob", hasJob)
 	defer func() {
 		klog.V(2).InfoS("end getReadyStatus", "readyStatus", readyStatus)
@@ -754,7 +1086,7 @@ func (l CanonicalMaasController) getReadyStatus(ctx context.Context, systemID st
 	cloudInitDone := false
 	if accessAddress != "" {
 		klog.V(2).InfoS("checking SSH reachability and cloud-init status", "systemID", systemID, "accessAddress", accessAddress)
-		sshReachable = l.isSSHReachable(ctx, accessAddress, 5*time.Second)
+		sshReachable = l.isSSHReachableConsecutive(ctx, accessAddress, 3, 2*time.Second)
 		if sshReachable {
 			klog.V(2).InfoS("SSH is reachable, checking cloud-init status", "systemID", systemID)
 			cloudInitDone = l.isCloudInitDone(ctx, accessAddress)
@@ -803,6 +1135,7 @@ func (l CanonicalMaasController) markBroken(ctx context.Context, err error, syst
 	})
 }
 
+
 /**********************************
 * public functions
 ***********************************/
@@ -830,130 +1163,22 @@ func (l CanonicalMaasController) MachineRegister(ctx context.Context, in *proto.
 		return
 	}
 
-	// register job
-	if l.JobManager != nil {
-		l.JobManager.Register(systemID, JobTypeMachineRegister)
-	}
-
-	// goroutine start
-	go func() {
-		if l.JobManager != nil {
-			defer l.JobManager.Deregister(systemID, JobTypeMachineRegister)
-		}
-
-		// Create independent context for async processing to avoid request context cancellation
+	if isWorkerMode() {
 		asyncCtx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 		defer cancel()
-
-		// commission.
-		err = l.internalCommission(asyncCtx, systemID)
-		if err != nil {
-			klog.V(2).InfoS("branch: commission failed", "systemID", systemID, "error", err)
-			l.markBroken(asyncCtx, err, systemID)
-			return
+		l.runMachineRegisterAsyncFlow(asyncCtx, in, systemID)
+	} else {
+		payload := marshalAsyncPayload(in)
+		requestID := buildAsyncRequestID(async_job.JobTypeMachineRegister, systemID, payload)
+		l.JobManager.RegisterWithInfo(systemID, async_job.JobTypeMachineRegister, requestID, "", payload)
+		reply = &proto.MachineRegisterResponse{
+			Result:       common.ResultCode_ACCEPT.Enum(),
+			ErrorMessage: "",
+			SystemId:     systemID,
 		}
-
-		// get subnet list
-		subnets, err := l.getSubnetList(asyncCtx)
-		if err != nil {
-			klog.V(2).InfoS("branch: get subnet list failed", "systemID", systemID, "error", err)
-			l.markBroken(asyncCtx, err, systemID)
-			return
-		}
-
-		// keep subnetID and mac address associated
-		macToSubnet := make(map[string]SubnetLinkPair)
-
-		// keep fabric_id and mac address associated
-		macToFabric := make(map[string]FabricPair)
-
-		// get machine access information
-		_, _, _, bootMac, bootSubnets, _, _, _, err := l.getMachineAccessInfo(asyncCtx, systemID)
-		if err != nil {
-			klog.V(2).InfoS("branch: get machine access info failed", "systemID", systemID, "error", err)
-			l.markBroken(asyncCtx, err, systemID)
-			return
-		}
-		macToSubnet[strings.ToLower(bootMac)] = SubnetLinkPair{subnetIds: bootSubnets, linkMode: "AUTO"}
-
-		// loop for network infomations
-		mac2name := make(map[string]string)
-		seenMacs := make(map[string]bool)
-		ethIdx := 0
-		for i := 0; i < len(in.GetNetworkInformation()); i++ {
-			klog.V(2).InfoS("Processing network information", "systemID", systemID, "index", i, "macAddress", in.GetNetworkInformation()[i].GetMacAddress())
-
-			inCidr := in.GetNetworkInformation()[i].GetCidr()
-			inAddrStart := in.GetNetworkInformation()[i].GetAddressStart()
-			inAddrEnd := in.GetNetworkInformation()[i].GetAddressEnd()
-			macAddr := in.GetNetworkInformation()[i].GetMacAddress()
-
-			// find subnet
-			matchID := l.findSubnet(subnets, inCidr)
-
-			var subnetID int
-			if matchID == nil {
-				klog.V(2).InfoS("branch: subnet not found, creating new subnet", "systemID", systemID, "cidr", inCidr)
-				// create subnet and ip range
-				id, err := l.createSubnetAndIPRange(asyncCtx, macToFabric, macAddr, inCidr, inAddrStart, inAddrEnd)
-				if err != nil {
-					klog.V(2).InfoS("branch: create subnet failed", "systemID", systemID, "cidr", inCidr, "error", err)
-					l.markBroken(asyncCtx, err, systemID)
-					return
-				}
-				subnetID = id
-				subnets = append(subnets, response_body.Subnet {
-					Cidr: inCidr,
-					ID: id,
-				})
-			} else {
-				klog.V(2).InfoS("branch: subnet found", "systemID", systemID, "cidr", inCidr, "subnetID", *matchID)
-				subnetID = *matchID
-			}
-
-			// save subnetID and mac address associated
-			existingPair := macToSubnet[strings.ToLower(macAddr)]
-			isDuplicate := false
-			for _, existingSubnetID := range existingPair.subnetIds {
-				if existingSubnetID == subnetID {
-					isDuplicate = true
-					klog.V(2).InfoS("subnet already linked to MAC, skipping duplicate", 
-						"macAddress", macAddr, "subnetID", subnetID)
-					break
-				}
-			}
-			if !isDuplicate {
-				macToSubnet[strings.ToLower(macAddr)] = SubnetLinkPair{
-					subnetIds: append(existingPair.subnetIds, subnetID), 
-					linkMode: "AUTO",
-				}
-			}
-
-			// build mac2name map: NetworkInformation order -> eth{i}
-			macLower := strings.ToLower(macAddr)
-			if !seenMacs[macLower] {
-				mac2name[macLower] = fmt.Sprintf("eth%d", ethIdx)
-				seenMacs[macLower] = true
-				ethIdx++
-			}
-		}
-
-		// get interface list.
-		interfaces, err := l.getInterfaceList(asyncCtx, systemID)
-		if err != nil {
-			klog.V(2).InfoS("branch: get interface list failed", "systemID", systemID, "error", err)
-			l.markBroken(asyncCtx, err, systemID)
-			return
-		}
-
-		// link interface to subnet (and rename per mac2name)
-		err = l.linkSubnetInterface(asyncCtx, systemID, interfaces, macToSubnet, "MacAddress", false, mac2name)
-		if err != nil {
-			klog.V(2).InfoS("branch: link subnet interface failed", "systemID", systemID, "error", err)
-			l.markBroken(asyncCtx, err, systemID)
-			return
-		}
-	}()
+		err = nil
+		return
+	}
 
 	reply = &proto.MachineRegisterResponse{
 		Result:       common.ResultCode_ACCEPT.Enum(),
@@ -1048,7 +1273,7 @@ func (l CanonicalMaasController) OsRelease(ctx context.Context, in *proto.OsRele
 
 	// find vm-host
 	klog.V(2).InfoS("checking for VM host", "systemID", in.GetSystemId())
-	hostID, err := l.getHostID(ctx, in.GetSystemId())
+	hostID, err := l.getHostID(ctx, in.GetSystemId(), false)
 	if err == nil { // if exits, delete vm-host
 		klog.V(2).InfoS("deleting VM host", "systemID", in.GetSystemId(), "hostID", hostID)
 		_, err = l.APIFactory.NewVMHostHostID(hostID).DELETE(ctx)
@@ -1064,7 +1289,7 @@ func (l CanonicalMaasController) OsRelease(ctx context.Context, in *proto.OsRele
 
 	// get machine access information
 	klog.V(2).InfoS("getting machine access information", "systemID", in.GetSystemId())
-	_, _, accessAddress, _, _, _, status, powerStatus, err := l.getMachineAccessInfo(ctx, in.SystemId)
+	_, _, accessAddress, _, _, _, status, powerStatus, err := l.getMachineAccessInfo(ctx, in.SystemId, false)
 	if err != nil {
 		klog.V(2).InfoS("branch: get machine access info failed", "systemID", in.GetSystemId(), "error", err)
 		errorProcess(err)
@@ -1170,7 +1395,7 @@ func (l CanonicalMaasController) VMCompose(ctx context.Context, in *proto.VmComp
 	}
 
 	// get machine access information
-	hostName, _, accessAddress, _, _, storage, _, _, err := l.getMachineAccessInfo(ctx, in.SystemId)
+	hostName, _, accessAddress, _, _, storage, _, _, err := l.getMachineAccessInfo(ctx, in.SystemId, false)
 	if err != nil {
 		klog.V(2).InfoS("branch: get machine access info failed", "hostSystemID", in.GetSystemId(), "error", err)
 		errorProcess(err)
@@ -1183,7 +1408,7 @@ func (l CanonicalMaasController) VMCompose(ctx context.Context, in *proto.VmComp
 	vmDiskSizeGiB := int(storage * float64(diskPercent) / 100.0 / 1024.0)
 
 	// get vmhosts list.
-	hostID, err := l.getHostID(ctx, in.GetSystemId())
+	hostID, err := l.getHostID(ctx, in.GetSystemId(), false)
 	if err != nil { // if not exist, register vmhosts
 		klog.V(2).InfoS("branch: VM host not found, creating new VM host", "hostSystemID", in.GetSystemId())
 
@@ -1262,7 +1487,7 @@ func (l CanonicalMaasController) VMCompose(ctx context.Context, in *proto.VmComp
 	time.Sleep(5 * time.Second) // delay for waiting complete
 
 	// get subnet list
-	subnets, err := l.getSubnetList(ctx)
+	subnets, err := l.getSubnetList(ctx, false)
 	if err != nil {
 		klog.V(2).InfoS("branch: get subnet list failed", "hostName", in.GetHostName(), "error", err)
 		errorProcess(err)
@@ -1290,7 +1515,7 @@ func (l CanonicalMaasController) VMCompose(ctx context.Context, in *proto.VmComp
 			klog.V(2).InfoS("branch: subnet not found, creating new subnet", "hostName", in.GetHostName(), "ifName", inName)
 			// create subnet and ip range
 			var id int
-			id, err = l.createSubnetAndIPRange(ctx, map[string]FabricPair{}, "", inCidr, inAddrStart, inAddrEnd)
+			id, err = l.createSubnetAndIPRange(ctx, map[string]FabricPair{}, "", inCidr, inAddrStart, inAddrEnd, false)
 			if err != nil {
 				klog.V(2).InfoS("branch: create subnet failed", "hostName", in.GetHostName(), "ifName", inName, "cidr", inCidr, "error", err)
 				errorProcess(err)
@@ -1343,50 +1568,21 @@ func (l CanonicalMaasController) VMCompose(ctx context.Context, in *proto.VmComp
 	}
 	systemID := responseBody.SystemID
 
-	// register job
-	if l.JobManager != nil {
-		l.JobManager.Register(systemID, JobTypeVMCompose)
-	}
-
-	// goroutine start
-	klog.V(2).InfoS("starting VM compose async processing", "hostName", in.GetHostName(), "systemID", systemID)
-	go func() {
-		if l.JobManager != nil {
-			defer l.JobManager.Deregister(systemID, JobTypeVMCompose)
-		}
-
-		// Create independent context for async processing to avoid request context cancellation
+	if isWorkerMode() {
 		asyncCtx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 		defer cancel()
-
-		// status polling
-		pollingInterval := 10 * time.Second
-		klog.V(2).InfoS("starting machine status polling", "systemID", systemID, "interval", pollingInterval)
-		e := l.pollingMachineStatus(asyncCtx, systemID, pollingInterval, []string{"Ready", "Failed commissioning"})
-		if e != nil {
-			klog.V(2).InfoS("branch: machine status polling failed", "systemID", systemID, "error", e)
-			l.markBroken(asyncCtx, e, systemID)
-			return
+		l.runVMComposeAsyncFlow(asyncCtx, systemID, nameToSubnet)
+	} else {
+		payload := marshalAsyncPayload(in)
+		requestID := buildAsyncRequestID(async_job.JobTypeVMCompose, systemID, payload)
+		l.JobManager.RegisterWithInfo(systemID, async_job.JobTypeVMCompose, requestID, "", payload)
+		reply = &proto.VmComposeResponse{
+			Result:       common.ResultCode_ACCEPT.Enum(),
+			ErrorMessage: "",
+			SystemId:     systemID,
 		}
-
-		// get interface list.
-		klog.V(2).InfoS("getting interface list", "systemID", systemID)
-		interfaceList, e := l.getInterfaceList(asyncCtx, systemID)
-		if e != nil {
-			klog.V(2).InfoS("branch: get interface list failed", "systemID", systemID, "error", e)
-			l.markBroken(asyncCtx, e, systemID)
-			return
-		}
-
-		// link interface to subnet (rename not required for VMCompose)
-		klog.V(2).InfoS("linking interfaces to subnets", "systemID", systemID)
-		e = l.linkSubnetInterface(asyncCtx, systemID, interfaceList, nameToSubnet, "Name", true, nil)
-		if e != nil {
-			klog.V(2).InfoS("branch: link subnet interface failed", "systemID", systemID, "error", e)
-			l.markBroken(asyncCtx, e, systemID)
-			return
-		}
-	}()
+		return
+	}
 
 	reply = &proto.VmComposeResponse{
 		Result:       common.ResultCode_ACCEPT.Enum(),
@@ -1559,10 +1755,16 @@ func (l CanonicalMaasController) Cancel(ctx context.Context, in *proto.CancelReq
 	}
 
 	systemID := in.GetSystemId()
+	hadProcessingJob := l.JobManager.HasProcessingJob(systemID)
+	if hadProcessingJob {
+		if cancelErr := l.JobManager.CancelJobs(systemID); cancelErr != nil {
+			klog.V(2).InfoS("branch: active job cancel failed", "systemID", systemID, "error", cancelErr)
+		}
+	}
 
 	// Get current machine state before attempting abort
 	klog.V(2).InfoS("checking machine state before cancellation", "systemID", systemID)
-	_, machineStatus, _, err := l.internalMachineShow(ctx, &proto.MachineShowRequest{SystemId: systemID}) // check if machine exists
+	_, machineStatus, _, err := l.internalMachineShow(ctx, &proto.MachineShowRequest{SystemId: systemID}, false) // check if machine exists
 	if err != nil {
 		errorProcess(err)
 		return
@@ -1578,6 +1780,14 @@ func (l CanonicalMaasController) Cancel(ctx context.Context, in *proto.CancelReq
 		}
 	}
 	if !isAbortable {
+		if hadProcessingJob {
+			reply = &proto.CancelResponse{
+				Result:       common.ResultCode_ACCEPT.Enum(),
+				ErrorMessage: "",
+			}
+			err = nil
+			return
+		}
 		err = &utils.CancelError{}
 		l.Logger.Error(err, err.Error())
 		errorProcess(err)
@@ -1683,7 +1893,7 @@ func (l CanonicalMaasController) NetworkUpdate(ctx context.Context, in *proto.Ne
 
 	// Get interface list (synchronous - outside goroutine)
 	klog.V(2).InfoS("getting interface list", "systemID", systemID)
-	interfaces, err := l.getInterfaceList(ctx, systemID)
+	interfaces, err := l.getInterfaceList(ctx, systemID, false)
 	if err != nil {
 		klog.V(2).InfoS("branch: get interface list failed", "systemID", systemID, "error", err)
 		errorProcess(err)
@@ -1692,7 +1902,7 @@ func (l CanonicalMaasController) NetworkUpdate(ctx context.Context, in *proto.Ne
 
 	// Get subnet list (synchronous - outside goroutine)
 	klog.V(2).InfoS("getting subnet list", "systemID", systemID)
-	subnets, err := l.getSubnetList(ctx)
+	subnets, err := l.getSubnetList(ctx, false)
 	if err != nil {
 		klog.V(2).InfoS("branch: get subnet list failed", "systemID", systemID, "error", err)
 		errorProcess(err)
@@ -1701,7 +1911,7 @@ func (l CanonicalMaasController) NetworkUpdate(ctx context.Context, in *proto.Ne
 
 	// Get machine access information (synchronous - outside goroutine)
 	klog.V(2).InfoS("getting machine access information", "systemID", systemID)
-	_, _, accessAddress, _, _, _, _, _, err := l.getMachineAccessInfo(ctx, systemID)
+	_, _, accessAddress, bootMacAddress, _, _, _, _, err := l.getMachineAccessInfo(ctx, systemID, false)
 	if err != nil {
 		klog.V(2).InfoS("branch: get machine access info failed", "systemID", systemID, "error", err)
 		errorProcess(err)
@@ -1722,6 +1932,12 @@ func (l CanonicalMaasController) NetworkUpdate(ctx context.Context, in *proto.Ne
 
 	for _, netInfo := range in.GetNetworkInformation() {
 		mac := strings.ToLower(netInfo.GetMacAddress())
+		// Skip the manager interface (boot interface) to preserve the SSH session.
+		// NetworkUpdate must not reconfigure the NIC that carries the management IP.
+		if mac == strings.ToLower(bootMacAddress) {
+			klog.V(2).InfoS("skipping manager interface (boot interface MAC)", "systemID", systemID, "mac", mac, "bootMacAddress", bootMacAddress)
+			continue
+		}
 		if _, exists := macGroups[mac]; !exists {
 			var targetInterface *response_body.Interface
 			for idx := range interfaces {
@@ -1925,7 +2141,7 @@ func (l CanonicalMaasController) KubeadmReset(ctx context.Context, in *proto.Kub
 
 	// get machine access information
 	klog.V(2).InfoS("getting machine access information", "systemID", systemID)
-	_, _, accessAddress, _, _, _, _, _, err := l.getMachineAccessInfo(ctx, systemID)
+	_, _, accessAddress, _, _, _, _, _, err := l.getMachineAccessInfo(ctx, systemID, false)
 	if err != nil {
 		klog.V(2).InfoS("branch: get machine access info failed", "systemID", systemID, "error", err)
 		errorProcess(err)
@@ -1968,113 +2184,35 @@ func (l CanonicalMaasController) KubeadmJoin(ctx context.Context, in *proto.Kube
 
 	// get worker machine access information
 	klog.V(2).InfoS("getting worker machine access information", "systemID", systemID)
-	_, _, workerAccessAddress, _, _, _, _, _, err := l.getMachineAccessInfo(ctx, systemID)
+	_, _, workerAccessAddress, _, _, _, _, _, err := l.getMachineAccessInfo(ctx, systemID, false)
 	if err != nil {
 		klog.V(2).InfoS("branch: get worker machine access info failed", "systemID", systemID, "error", err)
 		errorProcess(err)
 		return
 	}
 
-	// register job
-	if l.JobManager != nil {
-		l.JobManager.Register(systemID, JobTypeKubeadmJoin)
-	}
-
-	// execute kubeadm join process asynchronously
-	go func() {
-		if l.JobManager != nil {
-			defer l.JobManager.Deregister(systemID, JobTypeKubeadmJoin)
-		}
-		
-		// Create independent context for async processing to avoid request context cancellation
+	if isWorkerMode() {
 		asyncCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
-
-		cpSystemIDs := in.GetCpSystemId()
-		klog.V(2).InfoS("starting async kubeadm join process", "systemID", systemID, "cpSystemIDs", cpSystemIDs, "contextStatus", asyncCtx.Err())
-
-		// loop for control plane system IDs
-		joinCommand := ""
-		for _, cpSystemID := range cpSystemIDs {
-
-			// get control plane machine access information
-			klog.V(2).InfoS("getting control plane machine access information", "cpSystemID", cpSystemID)
-			_, _, cpAccessAddress, _, _, _, _, _, err := l.getMachineAccessInfo(asyncCtx, cpSystemID)
-			if err != nil {
-				klog.V(2).InfoS("branch: get control plane machine access info failed", "cpSystemID", cpSystemID, "error", err)
-				continue // try next control plane
-			}
-
-			// execute kubeadm token create on control plane to get join command
-			klog.V(2).InfoS("generating join token on control plane", "cpSystemID", cpSystemID, "cpAccessAddress", cpAccessAddress, "contextStatus", asyncCtx.Err())
-			tokenOutput, err := l.Ansible.CmdExecute(asyncCtx, cpAccessAddress, "kubeadm_token_create.yaml", "")
-			if err != nil {
-				klog.V(2).InfoS("branch: kubeadm token create failed", "cpSystemID", cpSystemID, "error", err)
-				continue // try next control plane
-			}
-			
-			// parse join command from ansible output
-			// Ansible debug output wraps the message value in JSON quotes:
-			//   ok: [host] => {
-			//       "msg": "KUBEADM_JOIN_COMMAND=kubeadm join ..."
-			//   }
-			// After SplitN on "KUBEADM_JOIN_COMMAND=", parts[1] ends with `"` (JSON closing quote).
-			// Use TrimSuffix to remove exactly that trailing `"` without touching the command value.
-			tokenStr := string(tokenOutput)
-			lines := strings.Split(tokenStr, "\n")
-			for _, line := range lines {
-				trimmed := strings.TrimSpace(line)
-				// First try to find the marked output
-				if strings.Contains(trimmed, "KUBEADM_JOIN_COMMAND=") {
-					parts := strings.SplitN(trimmed, "KUBEADM_JOIN_COMMAND=", 2)
-					if len(parts) == 2 {
-						// Strip the trailing `"` from Ansible's JSON debug output format
-						candidate := strings.TrimSuffix(strings.TrimSpace(parts[1]), `"`)
-						if strings.HasPrefix(candidate, "kubeadm join") {
-							joinCommand = candidate
-							break
-						}
-					}
-				}
-				// Fallback: look for direct kubeadm join command
-				if joinCommand == "" && strings.HasPrefix(trimmed, "kubeadm join") {
-					joinCommand = trimmed
-				}
-			}
-			if joinCommand == "" {
-				klog.V(2).InfoS("branch: join command not found in output", "error", err, "output", tokenStr)
-				continue // try next control plane
-			} else {
-				// join command found, break the loop
-				break
-			}
-		}
-
-		if joinCommand == "" {
-			klog.V(2).InfoS("branch: failed to extract join command from any control plane")
-			err := errors.New("failed to extract join command from control plane output")
-			l.markBroken(asyncCtx, err, systemID)
+		l.runKubeadmJoinAsyncFlow(asyncCtx, in, systemID, workerAccessAddress)
+	} else {
+		if !l.isSSHReachableConsecutive(ctx, workerAccessAddress, 3, 5*time.Second) {
+			err = errors.New("ssh is not reachable consecutively for 3 checks")
+			klog.V(2).InfoS("branch: join preconditions are not ready", "systemID", systemID, "workerAccessAddress", workerAccessAddress, "error", err)
+			errorProcess(err)
 			return
 		}
 
-		klog.V(2).InfoS("extracted join command", "joinCommand", joinCommand)
-
-		// prepare extra-vars for ansible with join command
-		// Use JSON format to safely handle special characters in the join command
-		extraVarsBytes, _ := json.Marshal(map[string]string{"join_command": joinCommand})
-		extra := string(extraVarsBytes)
-
-		// execute kubeadm join on worker node via ansible
-		klog.V(2).InfoS("executing kubeadm join on worker", "systemID", systemID, "workerAccessAddress", workerAccessAddress, "contextStatus", asyncCtx.Err())
-		_, err = l.Ansible.CmdExecute(asyncCtx, workerAccessAddress, "kubeadm_join.yaml", extra)
-		if err != nil {
-			klog.V(2).InfoS("branch: kubeadm join failed", "systemID", systemID, "error", err)
-			l.markBroken(asyncCtx, err, systemID)
-			return
+		payload := marshalAsyncPayload(in)
+		requestID := buildAsyncRequestID(async_job.JobTypeKubeadmJoin, systemID, payload)
+		l.JobManager.RegisterWithInfo(systemID, async_job.JobTypeKubeadmJoin, requestID, "", payload)
+		reply = &proto.KubeadmJoinResponse{
+			Result:       common.ResultCode_ACCEPT.Enum(),
+			ErrorMessage: "",
 		}
-
-		klog.V(2).InfoS("kubeadm join completed successfully", "systemID", systemID)
-	}()
+		err = nil
+		return
+	}
 
 	// return ACCEPT immediately
 	reply = &proto.KubeadmJoinResponse{

@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package implementation
 
 import (
@@ -578,6 +564,71 @@ func TestServerImplement_Collection_ValidAnsibleResponse_WritesMetrics(t *testin
 	// Verify - Should have 2 metric writes (CPU and Memory)
 	if writeCallCount != 2 {
 		t.Errorf("Expected 2 metric writes (CPU/Memory), got: %d", writeCallCount)
+	}
+}
+
+// TestServerImplement_Collection_WritesSystemIDLabel tests that systemId label is always included.
+func TestServerImplement_Collection_WritesSystemIDLabel(t *testing.T) {
+	cleanupKlog := test_utils.SetupTestEnvironmentWithKlog(t)
+	defer cleanupKlog()
+
+	cleanup := setEnvForServerTest(t, "SSH_KEY", "test-ssh-key")
+	defer cleanup()
+
+	logger := klog.NewKlogr()
+
+	mockAnsibleOutput := map[string]interface{}{
+		"cpu_usage": 50.0,
+		"mem_usage": 60.0,
+	}
+
+	mockAnsible := &MockServerAnsible{
+		cmdExecuteFunc: func(ctx context.Context, host, loginUser, sshKey, playbook, extraVars string) (interface{}, error) {
+			return mockAnsibleOutput, nil
+		},
+	}
+
+	writtenLabels := make([]prometheus.Labels, 0, 2)
+	mockMetrics := &MockServerMetrics{
+		writeFunc: func(gauge *prometheus.GaugeVec, labels prometheus.Labels, value float64, writedMetrics *[]interfaces.MetricLabel) error {
+			writtenLabels = append(writtenLabels, labels)
+			return nil
+		},
+	}
+
+	mockManager := &MockServerManager{
+		serverListFunc: func(targetList []interfaces.ServerTargetList) {},
+	}
+
+	server := &ServerImplement{
+		Logger:  logger,
+		Ansible: mockAnsible,
+		Metrics: mockMetrics,
+		Manager: mockManager,
+	}
+
+	targetList := []interfaces.ServerTargetList{
+		{
+			ServerID:      "server-001",
+			SystemID:      "system-001",
+			HostIPAddress: "192.168.1.100",
+			LoginUser:     "admin",
+		},
+	}
+
+	server.Colloction(targetList)
+
+	if len(writtenLabels) != 2 {
+		t.Fatalf("expected 2 metric writes, got %d", len(writtenLabels))
+	}
+
+	for i, labels := range writtenLabels {
+		if labels["serverId"] != "server-001" {
+			t.Fatalf("write %d: expected serverId=server-001, got %q", i, labels["serverId"])
+		}
+		if labels["systemId"] != "system-001" {
+			t.Fatalf("write %d: expected systemId=system-001, got %q", i, labels["systemId"])
+		}
 	}
 }
 

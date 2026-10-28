@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package implementation
 
 import (
@@ -169,8 +155,8 @@ defer cleanupMappings()
 	}
 
 	// Expect the APIExecute method of the mock API instance to be called for each target
-	mockAPI.EXPECT().APIExecuteUserAuth(gomock.Any(), "GET", "test_address1", "https://redfish/v1/Systems/System.Embedded.1", "test_user1", "test_password1", "").Return(apiResponse1, nil)
-	mockAPI.EXPECT().APIExecuteUserAuth(gomock.Any(), "GET", "test_address2", "https://redfish/v1/Systems/0", "test_user2", "test_password2", "").Return(apiResponse2, nil)
+	mockAPI.EXPECT().APIExecuteUserAuth(gomock.Any(), "GET", "https://test_address1", "redfish/v1/Systems/System.Embedded.1", "test_user1", "test_password1", "").Return(apiResponse1, nil)
+	mockAPI.EXPECT().APIExecuteUserAuth(gomock.Any(), "GET", "https://test_address2", "redfish/v1/Systems/0", "test_user2", "test_password2", "").Return(apiResponse2, nil)
 
 	// Expect the Write method of the mock Logging instance to be called for each target
 	mockLogging.EXPECT().Write("test_server1", `{ "processer": "OK", "memory": "OK" }`).Return(nil)
@@ -212,7 +198,7 @@ defer cleanupMappings()
 
 	// Expect the APIExecute method of the mock API instance to be called and return an error
 	expectedError := errors.New("api execute error")
-	mockAPI.EXPECT().APIExecuteUserAuth(gomock.Any(), "GET", "test_address1", "https://redfish/v1/Systems/0", "test_user1", "test_password1", "").Return(nil, expectedError)
+	mockAPI.EXPECT().APIExecuteUserAuth(gomock.Any(), "GET", "https://test_address1", "redfish/v1/Systems/0", "test_user1", "test_password1", "").Return(nil, expectedError)
 
 	// Call the Collection method
 	l.Collection(targetList)
@@ -439,7 +425,7 @@ defer cleanupMappings()
 	}
 
 	// Expect the APIExecute method of the mock API instance to be called
-	mockAPI.EXPECT().APIExecuteUserAuth(gomock.Any(), "GET", "test_address1", "https://redfish/v1/Systems/0", "test_user1", "test_password1", "").Return(apiResponse, nil)
+	mockAPI.EXPECT().APIExecuteUserAuth(gomock.Any(), "GET", "https://test_address1", "redfish/v1/Systems/0", "test_user1", "test_password1", "").Return(apiResponse, nil)
 
 	// Expect the Write method of the mock Logging instance NOT to be called because of errors
 	// The function should continue to the next target, but there's only one target in this test
@@ -489,7 +475,7 @@ defer cleanupMappings()
 	}
 
 	// Expect the APIExecute method of the mock API instance to be called
-	mockAPI.EXPECT().APIExecuteUserAuth(gomock.Any(), "GET", "test_address1", "https://redfish/v1/Systems/System.Embedded.1", "test_user1", "test_password1", "").Return(apiResponse, nil)
+	mockAPI.EXPECT().APIExecuteUserAuth(gomock.Any(), "GET", "https://test_address1", "redfish/v1/Systems/System.Embedded.1", "test_user1", "test_password1", "").Return(apiResponse, nil)
 
 	// Expect the Write method of the mock Logging instance NOT to be called because of errors
 	// The function should continue to the next target, but there's only one target in this test
@@ -542,7 +528,7 @@ defer cleanupMappings()
 	}
 
 	// Expect the APIExecute method to be called
-	mockAPI.EXPECT().APIExecuteUserAuth(gomock.Any(), "GET", "test_address1", "https://redfish/v1/Systems/System.Embedded.1", "test_user1", "test_password1", "").Return(apiResponse, nil)
+	mockAPI.EXPECT().APIExecuteUserAuth(gomock.Any(), "GET", "https://test_address1", "redfish/v1/Systems/System.Embedded.1", "test_user1", "test_password1", "").Return(apiResponse, nil)
 
 	// Expect Write method NOT to be called because of the parse error
 	// mockLogging.EXPECT().Write() should not be called
@@ -597,7 +583,7 @@ defer cleanupMappings()
 	}
 
 	// Expect the APIExecute method to be called
-	mockAPI.EXPECT().APIExecuteUserAuth(gomock.Any(), "GET", "test_address1", "https://redfish/v1/Systems/0", "test_user1", "test_password1", "").Return(apiResponse, nil)
+	mockAPI.EXPECT().APIExecuteUserAuth(gomock.Any(), "GET", "https://test_address1", "redfish/v1/Systems/0", "test_user1", "test_password1", "").Return(apiResponse, nil)
 
 	// Expect Write method NOT to be called because of the parse error
 	// mockLogging.EXPECT().Write() should not be called
@@ -648,7 +634,7 @@ defer cleanupMappings()
 	}
 
 	// Expect the APIExecute method to be called
-	mockAPI.EXPECT().APIExecuteUserAuth(gomock.Any(), "GET", "test_address1", "https://redfish/v1/Systems/System.Embedded.1", "test_user1", "test_password1", "").Return(apiResponse, nil)
+	mockAPI.EXPECT().APIExecuteUserAuth(gomock.Any(), "GET", "https://test_address1", "redfish/v1/Systems/System.Embedded.1", "test_user1", "test_password1", "").Return(apiResponse, nil)
 
 	// Expect Write method NOT to be called because of the parse error
 	// mockLogging.EXPECT().Write() should not be called
@@ -701,7 +687,7 @@ defer cleanupMappings()
 	}
 
 	// Expect the APIExecute method to be called
-	mockAPI.EXPECT().APIExecuteUserAuth(gomock.Any(), "GET", "test_address1", "https://redfish/v1/Systems/0", "test_user1", "test_password1", "").Return(apiResponse, nil)
+	mockAPI.EXPECT().APIExecuteUserAuth(gomock.Any(), "GET", "https://test_address1", "redfish/v1/Systems/0", "test_user1", "test_password1", "").Return(apiResponse, nil)
 
 	// Expect Write method NOT to be called because of the parse error
 	// mockLogging.EXPECT().Write() should not be called
@@ -756,7 +742,7 @@ defer cleanupMappings()
 	}
 
 	// Expect the APIExecute method to be called
-	mockAPI.EXPECT().APIExecuteUserAuth(gomock.Any(), "GET", "test_address1", "https://redfish/v1/Systems/System.Embedded.1", "test_user1", "test_password1", "").Return(apiResponse, nil)
+	mockAPI.EXPECT().APIExecuteUserAuth(gomock.Any(), "GET", "https://test_address1", "redfish/v1/Systems/System.Embedded.1", "test_user1", "test_password1", "").Return(apiResponse, nil)
 
 	// Expect Write method NOT to be called because of the parse error
 	// mockLogging.EXPECT().Write() should not be called

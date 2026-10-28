@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package canonical_maas
 
 import (
@@ -32,6 +18,7 @@ import (
 
 	proto "maas_module/api/proto"
     common "common/api/proto"    // import of common protobuf
+	"maas_module/internal/server/implementation/async_job"
 	"maas_module/internal/server/implementation/canonical_maas/maas_api/request_body"
 	"maas_module/internal/server/implementation/canonical_maas/maas_api/response_body"
 	"maas_module/internal/server/implementation/canonical_maas/mocks"
@@ -46,7 +33,7 @@ type mockMaasAnsible struct {
 	cmdExecuteErr    error
 }
 
-func (m *mockMaasAnsible) CmdExecute(ctx context.Context, remoteHost string, playbook string, extraArgs string) ([]byte, error) {
+func (m *mockMaasAnsible) CmdExecute(ctx context.Context, remoteHost string, playbook string, extraArgs string, retryCount ...int) ([]byte, error) {
 	return m.cmdExecuteOutput, m.cmdExecuteErr
 }
 
@@ -525,6 +512,7 @@ func TestCanonicalMaasController_OsRelease_UnregisterSkipped(t *testing.T) {
 		Logger:     klog.NewKlogr(),
 		APIFactory: mockFactory,
 		Ansible:    mockAnsible,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 	ctx := context.Background()
 	req := &proto.OsReleaseRequest{SystemId: "test-sys"}
@@ -737,6 +725,13 @@ func setupTestEnvironmentForController(t *testing.T) {
 		"SSH_KEY":          "/test/ssh/key",
 		"TLS_ENABLE":       "false",
 		"TLS_CERT_PATH":    "/certs",
+		"K8S_JOB_WORKER_IMAGE":            "test-worker:latest",
+		"K8S_JOB_SERVICE_ACCOUNT":         "test-service-account",
+		"K8S_JOB_BACKOFF_LIMIT":           "1",
+		"K8S_JOB_TTL_SECONDS":             "600",
+		"K8S_JOB_ACTIVE_DEADLINE_SECONDS": "7200",
+		"MAAS_API_RETRY_COUNT":            "10",
+		"MAAS_API_RETRY_INTERVAL_SECONDS": "5",
 	}
 
 	for key, value := range testEnv {
@@ -896,6 +891,7 @@ func TestCanonicalMaasController_reverseIPAddressRange_ValidCIDR_ReturnsCorrectR
 	// Arrange
 	controller := CanonicalMaasController{
 		Logger: klog.NewKlogr(),
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	testCases := []struct {
@@ -966,6 +962,7 @@ func TestCanonicalMaasController_findSubnet_ExistingCIDR_ReturnsSubnetID(t *test
 	// Arrange
 	controller := CanonicalMaasController{
 		Logger: klog.NewKlogr(),
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	subnets := []response_body.Subnet{
@@ -992,6 +989,7 @@ func TestCanonicalMaasController_findSubnet_NonExistingCIDR_ReturnsNil(t *testin
 	// Arrange
 	controller := CanonicalMaasController{
 		Logger: klog.NewKlogr(),
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	subnets := []response_body.Subnet{
@@ -1015,6 +1013,7 @@ func TestCanonicalMaasController_findSubnet_EmptySubnets_ReturnsNil(t *testing.T
 	// Arrange
 	controller := CanonicalMaasController{
 		Logger: klog.NewKlogr(),
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	subnets := []response_body.Subnet{}
@@ -1036,6 +1035,7 @@ func TestCanonicalMaasController_getErrorMessage_CustomError_ReturnsErrorMessage
 	// Arrange
 	controller := CanonicalMaasController{
 		Logger: klog.NewKlogr(),
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	testCases := []struct {
@@ -1097,6 +1097,7 @@ func TestCanonicalMaasController_getErrorMessage_StandardError_ReturnsUnknownErr
 	// Arrange
 	controller := CanonicalMaasController{
 		Logger: klog.NewKlogr(),
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	err := errors.New("standard error")
@@ -1124,6 +1125,7 @@ func TestCanonicalMaasController_getErrorMessage_NilError_ReturnsNil(t *testing.
 	// Arrange
 	controller := CanonicalMaasController{
 		Logger: klog.NewKlogr(),
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	// Act
@@ -1160,12 +1162,13 @@ func TestCanonicalMaasController_getSubnetList_APISuccess_ReturnsSubnets(t *test
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: mockFactory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
 
 	// Act
-	subnets, err := controller.getSubnetList(ctx)
+	subnets, err := controller.getSubnetList(ctx, false)
 
 	// Assert
 	if err != nil {
@@ -1196,12 +1199,13 @@ func TestCanonicalMaasController_getSubnetList_APIError_ReturnsError(t *testing.
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: mockFactory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
 
 	// Act
-	subnets, err := controller.getSubnetList(ctx)
+	subnets, err := controller.getSubnetList(ctx, false)
 
 	// Assert
 	if err == nil {
@@ -1238,13 +1242,14 @@ func TestCanonicalMaasController_getInterfaceList_APISuccess_ReturnsInterfaces(t
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: mockFactory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
 	systemID := "test-system-id"
 
 	// Act
-	interfaces, err := controller.getInterfaceList(ctx, systemID)
+	interfaces, err := controller.getInterfaceList(ctx, systemID, false)
 
 	// Assert
 	if err != nil {
@@ -1275,13 +1280,14 @@ func TestCanonicalMaasController_getInterfaceList_APIError_ReturnsError(t *testi
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: mockFactory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
 	systemID := "test-system-id"
 
 	// Act
-	interfaces, err := controller.getInterfaceList(ctx, systemID)
+	interfaces, err := controller.getInterfaceList(ctx, systemID, false)
 
 	// Assert
 	if err == nil {
@@ -1318,12 +1324,13 @@ func TestCanonicalMaasController_getHostList_APISuccess_ReturnsHosts(t *testing.
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: mockFactory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
 
 	// Act
-	hosts, err := controller.getHostList(ctx)
+	hosts, err := controller.getHostList(ctx, false)
 
 	// Assert
 	if err != nil {
@@ -1354,12 +1361,13 @@ func TestCanonicalMaasController_getHostList_APIError_ReturnsError(t *testing.T)
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: mockFactory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
 
 	// Act
-	hosts, err := controller.getHostList(ctx)
+	hosts, err := controller.getHostList(ctx, false)
 
 	// Assert
 	if err == nil {
@@ -1398,6 +1406,7 @@ func TestCanonicalMaasController_internalMachineRegister_Success_ReturnsSystemID
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: mockFactory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -1440,6 +1449,7 @@ func TestCanonicalMaasController_internalMachineRegister_APIError_ReturnsError(t
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: mockFactory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -1483,6 +1493,7 @@ func TestCanonicalMaasController_internalMachineRegister_InvalidResponseType_Ret
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: mockFactory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -1534,6 +1545,7 @@ func TestCanonicalMaasController_pollingMachineStatus_TargetStatusReached_Return
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: mockFactory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -1542,7 +1554,7 @@ func TestCanonicalMaasController_pollingMachineStatus_TargetStatusReached_Return
 	checkStatus := []string{"Ready", "Failed"}
 
 	// Act
-	err := controller.pollingMachineStatus(ctx, systemID, pollingInterval, checkStatus)
+	err := controller.pollingMachineStatus(ctx, systemID, pollingInterval, checkStatus, false)
 
 	// Assert
 	if err != nil {
@@ -1569,6 +1581,7 @@ func TestCanonicalMaasController_pollingMachineStatus_APIError_ReturnsError(t *t
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: mockFactory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -1577,7 +1590,7 @@ func TestCanonicalMaasController_pollingMachineStatus_APIError_ReturnsError(t *t
 	checkStatus := []string{"Ready"}
 
 	// Act
-	err := controller.pollingMachineStatus(ctx, systemID, pollingInterval, checkStatus)
+	err := controller.pollingMachineStatus(ctx, systemID, pollingInterval, checkStatus, false)
 
 	// Assert
 	if err == nil {
@@ -1628,13 +1641,14 @@ func TestCanonicalMaasController_getHostID_ExistingHost_ReturnsHostID(t *testing
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: mockFactory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
 	systemID := "target-system-id"
 
 	// Act
-	hostID, err := controller.getHostID(ctx, systemID)
+	hostID, err := controller.getHostID(ctx, systemID, false)
 
 	// Assert
 	if err != nil {
@@ -1681,13 +1695,14 @@ func TestCanonicalMaasController_getHostID_NonExistingHost_ReturnsError(t *testi
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: mockFactory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
 	systemID := "non-existing-system-id"
 
 	// Act
-	hostID, err := controller.getHostID(ctx, systemID)
+	hostID, err := controller.getHostID(ctx, systemID, false)
 
 	// Assert
 	if err == nil {
@@ -1719,6 +1734,7 @@ func TestCanonicalMaasController_markBroken_ValidError_CallsMarkBrokenAPI(t *tes
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: mockFactory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	testError := errors.New("test error")
@@ -1800,6 +1816,7 @@ func TestCanonicalMaasController_MachineRegister_AllPaths(t *testing.T) {
 			controller := CanonicalMaasController{
 				Logger:     klog.NewKlogr(),
 				APIFactory: mockFactory,
+				JobManager: async_job.NewInMemoryJobManager(),
 			}
 
 			ctx := context.Background()
@@ -1831,6 +1848,7 @@ func TestCanonicalMaasController_MachineRegister_AllPaths(t *testing.T) {
 
 // Test for MachineRegister with commission failure path using gomock
 func TestCanonicalMaasController_MachineRegister_CommissionFailure(t *testing.T) {
+	t.Setenv("MAAS_RUN_MODE", "worker")
 	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
 	defer cleanup()
 
@@ -1859,7 +1877,7 @@ func TestCanonicalMaasController_MachineRegister_CommissionFailure(t *testing.T)
 		}, nil)
 
 	// Mock commission failure
-	mockFactory.EXPECT().NewMachineCommission("test-system-id").Return(mockCommissionAPI)
+	mockFactory.EXPECT().NewMachineCommission("test-system-id", gomock.Any()).Return(mockCommissionAPI)
 	mockCommissionAPI.EXPECT().POST(gomock.Any(), gomock.Any()).Return(
 		response_body.ResbodyCommon{}, errors.New("commission failed"))
 
@@ -1871,6 +1889,7 @@ func TestCanonicalMaasController_MachineRegister_CommissionFailure(t *testing.T)
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: mockFactory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -1946,6 +1965,7 @@ func TestCanonicalMaasController_MachineDelete_AllPaths(t *testing.T) {
 			controller := CanonicalMaasController{
 				Logger:     klog.NewKlogr(),
 				APIFactory: mockFactory,
+				JobManager: async_job.NewInMemoryJobManager(),
 			}
 
 			ctx := context.Background()
@@ -2031,6 +2051,7 @@ func TestCanonicalMaasController_MachineList_AllPaths(t *testing.T) {
 			controller := CanonicalMaasController{
 				Logger:     klog.NewKlogr(),
 				APIFactory: mockFactory,
+				JobManager: async_job.NewInMemoryJobManager(),
 			}
 
 			ctx := context.Background()
@@ -2123,6 +2144,7 @@ func TestCanonicalMaasController_MachineRegister_CompleteScenarios(t *testing.T)
 				Logger:     klog.NewKlogr(),
 				APIFactory: mockFactory,
 				Ansible:    mockAnsible,
+				JobManager: async_job.NewInMemoryJobManager(),
 			}
 
 			ctx := context.Background()
@@ -2231,6 +2253,7 @@ func TestCanonicalMaasController_OsDeploy_AllPaths(t *testing.T) {
 				Logger:     klog.NewKlogr(),
 				APIFactory: mockFactory,
 				Ansible:    mockAnsible,
+				JobManager: async_job.NewInMemoryJobManager(),
 			}
 
 			ctx := context.Background()
@@ -2317,6 +2340,7 @@ func TestCanonicalMaasController_OsRelease_AllPaths(t *testing.T) {
 				Logger:     klog.NewKlogr(),
 				APIFactory: mockFactory,
 				Ansible:    mockAnsible,
+				JobManager: async_job.NewInMemoryJobManager(),
 			}
 
 			ctx := context.Background()
@@ -2348,6 +2372,7 @@ func TestCanonicalMaasController_OsRelease_AllPaths(t *testing.T) {
 
 // Test for VMCompose function - Complete success path
 func TestCanonicalMaasController_VMCompose_CompleteSuccessPath(t *testing.T) {
+	t.Setenv("MAAS_RUN_MODE", "worker")
 	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
 	defer cleanup()
 
@@ -2407,7 +2432,7 @@ func TestCanonicalMaasController_VMCompose_CompleteSuccessPath(t *testing.T) {
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewMachineSystemID("host-system-id").Return(mockMachineAPI).Times(1)
+	factory.EXPECT().NewMachineSystemID("host-system-id", gomock.Any()).Return(mockMachineAPI).Times(1)
 
 	// Step 2: Mock getHostID (VM host found)
 	mockVMHostsAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -2424,7 +2449,7 @@ func TestCanonicalMaasController_VMCompose_CompleteSuccessPath(t *testing.T) {
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewVMHosts().Return(mockVMHostsAPI).Times(1)
+	factory.EXPECT().NewVMHosts(gomock.Any()).Return(mockVMHostsAPI).Times(1)
 
 	// Step 3: Mock VM host refresh
 	mockVMHostRefreshAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -2443,7 +2468,7 @@ func TestCanonicalMaasController_VMCompose_CompleteSuccessPath(t *testing.T) {
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewSubnets().Return(mockSubnetAPI).Times(1)
+	factory.EXPECT().NewSubnets(gomock.Any()).Return(mockSubnetAPI).Times(1)
 
 	// Step 5: Mock VM compose
 	mockVMComposeAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -2470,7 +2495,7 @@ func TestCanonicalMaasController_VMCompose_CompleteSuccessPath(t *testing.T) {
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil).AnyTimes()
 
-	factory.EXPECT().NewMachineSystemID("composed-vm-system-id").Return(mockPollingAPI).Times(1)
+	factory.EXPECT().NewMachineSystemID("composed-vm-system-id", gomock.Any()).Return(mockPollingAPI).Times(1)
 
 	// Step 8: Mock getInterfaceList
 	mockInterfaceListAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -2486,24 +2511,25 @@ func TestCanonicalMaasController_VMCompose_CompleteSuccessPath(t *testing.T) {
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewInterfaces("composed-vm-system-id").Return(mockInterfaceListAPI).Times(1)
+	factory.EXPECT().NewInterfaces("composed-vm-system-id", gomock.Any()).Return(mockInterfaceListAPI).Times(1)
 
 	// Step 9: Mock linkSubnetInterface operations (disconnect + link)
 	mockDisconnectAPI := mocks.NewMockBasisMaasAPI(ctrl)
 	mockDisconnectAPI.EXPECT().POST(gomock.Any(), gomock.Any()).Return(
 		response_body.ResbodyCommon{HTTPStatus: 200}, nil)
 
-	factory.EXPECT().NewInterfaceDisconnect("composed-vm-system-id", 1).Return(mockDisconnectAPI).Times(1)
+	factory.EXPECT().NewInterfaceDisconnect("composed-vm-system-id", 1, gomock.Any()).Return(mockDisconnectAPI).Times(1)
 
 	mockLinkAPI := mocks.NewMockBasisMaasAPI(ctrl)
 	mockLinkAPI.EXPECT().POST(gomock.Any(), gomock.Any()).Return(
 		response_body.ResbodyCommon{HTTPStatus: 200}, nil)
 
-	factory.EXPECT().NewInterfaceLink("composed-vm-system-id", 1).Return(mockLinkAPI).Times(1)
+	factory.EXPECT().NewInterfaceLink("composed-vm-system-id", 1, gomock.Any()).Return(mockLinkAPI).Times(1)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -2574,7 +2600,7 @@ func TestCanonicalMaasController_VMCompose_VMHostRegistrationPath(t *testing.T) 
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewMachineSystemID("new-host-system-id").Return(mockMachineAPI).Times(1)
+	factory.EXPECT().NewMachineSystemID("new-host-system-id", gomock.Any()).Return(mockMachineAPI).Times(1)
 
 	// Step 2: Mock getHostID (VM host NOT found - triggers registration)
 	mockVMHostsAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -2591,7 +2617,7 @@ func TestCanonicalMaasController_VMCompose_VMHostRegistrationPath(t *testing.T) 
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewVMHosts().Return(mockVMHostsAPI).Times(1)
+	factory.EXPECT().NewVMHosts(gomock.Any()).Return(mockVMHostsAPI).Times(1)
 
 	// Step 3: Mock VM host registration
 	mockVMHostRegisterAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -2601,7 +2627,7 @@ func TestCanonicalMaasController_VMCompose_VMHostRegistrationPath(t *testing.T) 
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 201},
 		}, nil)
 
-	factory.EXPECT().NewVMHosts().Return(mockVMHostRegisterAPI).Times(1)
+	factory.EXPECT().NewVMHosts(gomock.Any()).Return(mockVMHostRegisterAPI).Times(1)
 
 	// Step 4: Mock VM host parameters
 	mockVMHostParamsAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -2636,7 +2662,7 @@ func TestCanonicalMaasController_VMCompose_VMHostRegistrationPath(t *testing.T) 
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewSubnets().Return(mockSubnetAPI).Times(1)
+	factory.EXPECT().NewSubnets(gomock.Any()).Return(mockSubnetAPI).Times(1)
 
 	// Step 8: Mock VM compose
 	mockVMComposeAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -2657,12 +2683,13 @@ func TestCanonicalMaasController_VMCompose_VMHostRegistrationPath(t *testing.T) 
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil).AnyTimes()
 
-	factory.EXPECT().NewMachineSystemID("new-vm-system-id").Return(mockPollingAPI).AnyTimes()
+	factory.EXPECT().NewMachineSystemID("new-vm-system-id", gomock.Any()).Return(mockPollingAPI).AnyTimes()
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
 		Ansible:    mockAnsible,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -2714,11 +2741,12 @@ func TestCanonicalMaasController_VMCompose_GetMachineAccessInfoFailure(t *testin
 	mockMachineAPI.EXPECT().GET(gomock.Any()).Return(
 		nil, errors.New("machine not found"))
 
-	factory.EXPECT().NewMachineSystemID("invalid-system-id").Return(mockMachineAPI).Times(1)
+	factory.EXPECT().NewMachineSystemID("invalid-system-id", gomock.Any()).Return(mockMachineAPI).Times(1)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -2776,7 +2804,7 @@ func TestCanonicalMaasController_VMCompose_VMComposeAPIFailure(t *testing.T) {
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewMachineSystemID("host-system-id").Return(mockMachineAPI).Times(1)
+	factory.EXPECT().NewMachineSystemID("host-system-id", gomock.Any()).Return(mockMachineAPI).Times(1)
 
 	// Mock successful getHostID
 	mockVMHostsAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -2793,7 +2821,7 @@ func TestCanonicalMaasController_VMCompose_VMComposeAPIFailure(t *testing.T) {
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewVMHosts().Return(mockVMHostsAPI).Times(1)
+	factory.EXPECT().NewVMHosts(gomock.Any()).Return(mockVMHostsAPI).Times(1)
 
 	// Mock successful VM host refresh
 	mockVMHostRefreshAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -2810,7 +2838,7 @@ func TestCanonicalMaasController_VMCompose_VMComposeAPIFailure(t *testing.T) {
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewSubnets().Return(mockSubnetAPI).Times(1)
+	factory.EXPECT().NewSubnets(gomock.Any()).Return(mockSubnetAPI).Times(1)
 
 	// Mock VM compose API failure
 	mockVMComposeAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -2822,6 +2850,7 @@ func TestCanonicalMaasController_VMCompose_VMComposeAPIFailure(t *testing.T) {
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -2879,7 +2908,7 @@ func TestCanonicalMaasController_VMCompose_ResponseTypeCastFailure(t *testing.T)
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewMachineSystemID("host-system-id").Return(mockMachineAPI).Times(1)
+	factory.EXPECT().NewMachineSystemID("host-system-id", gomock.Any()).Return(mockMachineAPI).Times(1)
 
 	// Mock successful getHostID
 	mockVMHostsAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -2896,7 +2925,7 @@ func TestCanonicalMaasController_VMCompose_ResponseTypeCastFailure(t *testing.T)
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewVMHosts().Return(mockVMHostsAPI).Times(1)
+	factory.EXPECT().NewVMHosts(gomock.Any()).Return(mockVMHostsAPI).Times(1)
 
 	// Mock successful VM host refresh
 	mockVMHostRefreshAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -2913,7 +2942,7 @@ func TestCanonicalMaasController_VMCompose_ResponseTypeCastFailure(t *testing.T)
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewSubnets().Return(mockSubnetAPI).Times(1)
+	factory.EXPECT().NewSubnets(gomock.Any()).Return(mockSubnetAPI).Times(1)
 
 	// Mock VM compose API that returns wrong type
 	mockVMComposeAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -2925,6 +2954,7 @@ func TestCanonicalMaasController_VMCompose_ResponseTypeCastFailure(t *testing.T)
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -2982,7 +3012,7 @@ func TestCanonicalMaasController_VMCompose_VMHostRegistrationFailure(t *testing.
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewMachineSystemID("new-host-system-id").Return(mockMachineAPI).Times(1)
+	factory.EXPECT().NewMachineSystemID("new-host-system-id", gomock.Any()).Return(mockMachineAPI).Times(1)
 
 	// Mock getHostID (VM host NOT found)
 	mockVMHostsAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -2992,14 +3022,14 @@ func TestCanonicalMaasController_VMCompose_VMHostRegistrationFailure(t *testing.
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewVMHosts().Return(mockVMHostsAPI).Times(1)
+	factory.EXPECT().NewVMHosts(gomock.Any()).Return(mockVMHostsAPI).Times(1)
 
 	// Mock VM host registration failure
 	mockVMHostRegisterAPI := mocks.NewMockBasisMaasAPI(ctrl)
 	mockVMHostRegisterAPI.EXPECT().POST(gomock.Any(), gomock.Any()).Return(
 		nil, errors.New("VM host registration failed"))
 
-	factory.EXPECT().NewVMHosts().Return(mockVMHostRegisterAPI).Times(1)
+	factory.EXPECT().NewVMHosts(gomock.Any()).Return(mockVMHostRegisterAPI).Times(1)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
@@ -3008,6 +3038,7 @@ func TestCanonicalMaasController_VMCompose_VMHostRegistrationFailure(t *testing.
 			cmdExecuteOutput: []byte("ansible successfully"),
 			cmdExecuteErr:    nil,
 		},
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -3065,7 +3096,7 @@ func TestCanonicalMaasController_VMCompose_VMHostRegistrationTypeCastFailure(t *
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewMachineSystemID("new-host-system-id").Return(mockMachineAPI).Times(1)
+	factory.EXPECT().NewMachineSystemID("new-host-system-id", gomock.Any()).Return(mockMachineAPI).Times(1)
 
 	// Mock getHostID (VM host NOT found)
 	mockVMHostsAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -3075,14 +3106,14 @@ func TestCanonicalMaasController_VMCompose_VMHostRegistrationTypeCastFailure(t *
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewVMHosts().Return(mockVMHostsAPI).Times(1)
+	factory.EXPECT().NewVMHosts(gomock.Any()).Return(mockVMHostsAPI).Times(1)
 
 	// Mock VM host registration type cast failure
 	mockVMHostRegisterAPI := mocks.NewMockBasisMaasAPI(ctrl)
 	mockVMHostRegisterAPI.EXPECT().POST(gomock.Any(), gomock.Any()).Return(
 		response_body.ResbodyCommon{HTTPStatus: 201}, nil) // Wrong type
 
-	factory.EXPECT().NewVMHosts().Return(mockVMHostRegisterAPI).Times(1)
+	factory.EXPECT().NewVMHosts(gomock.Any()).Return(mockVMHostRegisterAPI).Times(1)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
@@ -3091,6 +3122,7 @@ func TestCanonicalMaasController_VMCompose_VMHostRegistrationTypeCastFailure(t *
 			cmdExecuteOutput: []byte("ansible successfully"),
 			cmdExecuteErr:    nil,
 		},
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -3148,7 +3180,7 @@ func TestCanonicalMaasController_VMCompose_VMHostParametersFailure(t *testing.T)
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewMachineSystemID("new-host-system-id").Return(mockMachineAPI).Times(1)
+	factory.EXPECT().NewMachineSystemID("new-host-system-id", gomock.Any()).Return(mockMachineAPI).Times(1)
 
 	// Mock getHostID (VM host NOT found)
 	mockVMHostsAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -3158,7 +3190,7 @@ func TestCanonicalMaasController_VMCompose_VMHostParametersFailure(t *testing.T)
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewVMHosts().Return(mockVMHostsAPI).Times(1)
+	factory.EXPECT().NewVMHosts(gomock.Any()).Return(mockVMHostsAPI).Times(1)
 
 	// Mock successful VM host registration
 	mockVMHostRegisterAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -3168,7 +3200,7 @@ func TestCanonicalMaasController_VMCompose_VMHostParametersFailure(t *testing.T)
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 201},
 		}, nil)
 
-	factory.EXPECT().NewVMHosts().Return(mockVMHostRegisterAPI).Times(1)
+	factory.EXPECT().NewVMHosts(gomock.Any()).Return(mockVMHostRegisterAPI).Times(1)
 
 	// Mock VM host parameters failure
 	mockVMHostParamsAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -3184,6 +3216,7 @@ func TestCanonicalMaasController_VMCompose_VMHostParametersFailure(t *testing.T)
 			cmdExecuteOutput: []byte("ansible successfully"),
 			cmdExecuteErr:    nil,
 		},
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -3241,7 +3274,7 @@ func TestCanonicalMaasController_VMCompose_VMHostParametersTypeCastFailure(t *te
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewMachineSystemID("new-host-system-id").Return(mockMachineAPI).Times(1)
+	factory.EXPECT().NewMachineSystemID("new-host-system-id", gomock.Any()).Return(mockMachineAPI).Times(1)
 
 	// Mock getHostID (VM host NOT found)
 	mockVMHostsAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -3251,7 +3284,7 @@ func TestCanonicalMaasController_VMCompose_VMHostParametersTypeCastFailure(t *te
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewVMHosts().Return(mockVMHostsAPI).Times(1)
+	factory.EXPECT().NewVMHosts(gomock.Any()).Return(mockVMHostsAPI).Times(1)
 
 	// Mock successful VM host registration
 	mockVMHostRegisterAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -3261,7 +3294,7 @@ func TestCanonicalMaasController_VMCompose_VMHostParametersTypeCastFailure(t *te
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 201},
 		}, nil)
 
-	factory.EXPECT().NewVMHosts().Return(mockVMHostRegisterAPI).Times(1)
+	factory.EXPECT().NewVMHosts(gomock.Any()).Return(mockVMHostRegisterAPI).Times(1)
 
 	// Mock VM host parameters type cast failure
 	mockVMHostParamsAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -3277,6 +3310,7 @@ func TestCanonicalMaasController_VMCompose_VMHostParametersTypeCastFailure(t *te
 			cmdExecuteOutput: []byte("ansible successfully"),
 			cmdExecuteErr:    nil,
 		},
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -3334,7 +3368,7 @@ func TestCanonicalMaasController_VMCompose_VMHostRefreshFailure(t *testing.T) {
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewMachineSystemID("host-system-id").Return(mockMachineAPI).Times(1)
+	factory.EXPECT().NewMachineSystemID("host-system-id", gomock.Any()).Return(mockMachineAPI).Times(1)
 
 	// Mock successful getHostID
 	mockVMHostsAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -3351,7 +3385,7 @@ func TestCanonicalMaasController_VMCompose_VMHostRefreshFailure(t *testing.T) {
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewVMHosts().Return(mockVMHostsAPI).Times(1)
+	factory.EXPECT().NewVMHosts(gomock.Any()).Return(mockVMHostsAPI).Times(1)
 
 	// Mock VM host refresh failure
 	mockVMHostRefreshAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -3367,6 +3401,7 @@ func TestCanonicalMaasController_VMCompose_VMHostRefreshFailure(t *testing.T) {
 			cmdExecuteOutput: []byte("ansible successfully"),
 			cmdExecuteErr:    nil,
 		},
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -3431,7 +3466,7 @@ func TestCanonicalMaasController_VMCompose_GetSubnetListFailure(t *testing.T) {
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewMachineSystemID("host-system-id").Return(mockMachineAPI).Times(1)
+	factory.EXPECT().NewMachineSystemID("host-system-id", gomock.Any()).Return(mockMachineAPI).Times(1)
 
 	// Mock successful getHostID
 	mockVMHostsAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -3448,7 +3483,7 @@ func TestCanonicalMaasController_VMCompose_GetSubnetListFailure(t *testing.T) {
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewVMHosts().Return(mockVMHostsAPI).Times(1)
+	factory.EXPECT().NewVMHosts(gomock.Any()).Return(mockVMHostsAPI).Times(1)
 
 	// Mock successful VM host refresh
 	mockVMHostRefreshAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -3462,7 +3497,7 @@ func TestCanonicalMaasController_VMCompose_GetSubnetListFailure(t *testing.T) {
 	mockSubnetAPI.EXPECT().GET(gomock.Any()).Return(
 		nil, errors.New("subnet list retrieval failed"))
 
-	factory.EXPECT().NewSubnets().Return(mockSubnetAPI).Times(1)
+	factory.EXPECT().NewSubnets(gomock.Any()).Return(mockSubnetAPI).Times(1)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
@@ -3471,6 +3506,7 @@ func TestCanonicalMaasController_VMCompose_GetSubnetListFailure(t *testing.T) {
 			cmdExecuteOutput: []byte("ansible successfully"),
 			cmdExecuteErr:    nil,
 		},
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -3535,7 +3571,7 @@ func TestCanonicalMaasController_VMCompose_GetSubnetListTypeCastFailure(t *testi
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewMachineSystemID("host-system-id").Return(mockMachineAPI).Times(1)
+	factory.EXPECT().NewMachineSystemID("host-system-id", gomock.Any()).Return(mockMachineAPI).Times(1)
 
 	mockVMHostsAPI := mocks.NewMockBasisMaasAPI(ctrl)
 	mockVMHostsAPI.EXPECT().GET(gomock.Any()).Return(
@@ -3551,7 +3587,7 @@ func TestCanonicalMaasController_VMCompose_GetSubnetListTypeCastFailure(t *testi
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewVMHosts().Return(mockVMHostsAPI).Times(1)
+	factory.EXPECT().NewVMHosts(gomock.Any()).Return(mockVMHostsAPI).Times(1)
 
 	mockVMHostRefreshAPI := mocks.NewMockBasisMaasAPI(ctrl)
 	mockVMHostRefreshAPI.EXPECT().POST(gomock.Any(), gomock.Any()).Return(
@@ -3564,7 +3600,7 @@ func TestCanonicalMaasController_VMCompose_GetSubnetListTypeCastFailure(t *testi
 	mockSubnetAPI.EXPECT().GET(gomock.Any()).Return(
 		response_body.ResbodyCommon{HTTPStatus: 200}, nil) // Wrong type
 
-	factory.EXPECT().NewSubnets().Return(mockSubnetAPI).Times(1)
+	factory.EXPECT().NewSubnets(gomock.Any()).Return(mockSubnetAPI).Times(1)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
@@ -3573,6 +3609,7 @@ func TestCanonicalMaasController_VMCompose_GetSubnetListTypeCastFailure(t *testi
 			cmdExecuteOutput: []byte("ansible successfully"),
 			cmdExecuteErr:    nil,
 		},
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -3644,7 +3681,7 @@ func TestCanonicalMaasController_VMCompose_LXDSetupFailure(t *testing.T) {
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewMachineSystemID("new-host-system-id").Return(mockMachineAPI).Times(1)
+	factory.EXPECT().NewMachineSystemID("new-host-system-id", gomock.Any()).Return(mockMachineAPI).Times(1)
 
 	// Mock getHostID (VM host NOT found - triggers registration)
 	mockVMHostsAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -3654,7 +3691,7 @@ func TestCanonicalMaasController_VMCompose_LXDSetupFailure(t *testing.T) {
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewVMHosts().Return(mockVMHostsAPI).Times(1)
+	factory.EXPECT().NewVMHosts(gomock.Any()).Return(mockVMHostsAPI).Times(1)
 
 	// Mock Ansible failure for LXD setup (setup_lxd.yaml)
 	mockAnsible := &mockMaasAnsible{
@@ -3666,6 +3703,7 @@ func TestCanonicalMaasController_VMCompose_LXDSetupFailure(t *testing.T) {
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
 		Ansible:    mockAnsible,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -3741,7 +3779,7 @@ func TestCanonicalMaasController_VMCompose_CertificateRegistrationFailure(t *tes
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewMachineSystemID("new-host-system-id").Return(mockMachineAPI).Times(1)
+	factory.EXPECT().NewMachineSystemID("new-host-system-id", gomock.Any()).Return(mockMachineAPI).Times(1)
 
 	// Mock getHostID (VM host NOT found - triggers registration)
 	mockVMHostsAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -3751,7 +3789,7 @@ func TestCanonicalMaasController_VMCompose_CertificateRegistrationFailure(t *tes
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewVMHosts().Return(mockVMHostsAPI).Times(1)
+	factory.EXPECT().NewVMHosts(gomock.Any()).Return(mockVMHostsAPI).Times(1)
 
 	// Mock successful VM host registration
 	mockVMHostRegisterAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -3761,7 +3799,7 @@ func TestCanonicalMaasController_VMCompose_CertificateRegistrationFailure(t *tes
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 201},
 		}, nil)
 
-	factory.EXPECT().NewVMHosts().Return(mockVMHostRegisterAPI).Times(1)
+	factory.EXPECT().NewVMHosts(gomock.Any()).Return(mockVMHostRegisterAPI).Times(1)
 
 	// Mock successful VM host parameters (get certificate)
 	mockVMHostParamsAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -3778,7 +3816,7 @@ func TestCanonicalMaasController_VMCompose_CertificateRegistrationFailure(t *tes
 	callCount := 0
 	mockAnsible.EXPECT().
 		CmdExecute(gomock.Any(), gomock.Eq("10.0.0.50"), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(ctx context.Context, remoteHost string, playbook string, extraArgs string) ([]byte, error) {
+		DoAndReturn(func(ctx context.Context, remoteHost string, playbook string, extraArgs string, _ ...int) ([]byte, error) {
 			callCount++
 			t.Logf("🔍 Ansible call #%d: playbook=%s", callCount, playbook)
 
@@ -3802,6 +3840,7 @@ func TestCanonicalMaasController_VMCompose_CertificateRegistrationFailure(t *tes
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
 		Ansible:    mockAnsible,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -3886,7 +3925,7 @@ func TestCanonicalMaasController_VMCompose_SubnetNotFoundCreateSubnetFailure(t *
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewMachineSystemID("host-system-id").Return(mockMachineAPI).Times(1)
+	factory.EXPECT().NewMachineSystemID("host-system-id", gomock.Any()).Return(mockMachineAPI).Times(1)
 
 	// Mock successful getHostID
 	mockVMHostsAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -3903,7 +3942,7 @@ func TestCanonicalMaasController_VMCompose_SubnetNotFoundCreateSubnetFailure(t *
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewVMHosts().Return(mockVMHostsAPI).Times(1)
+	factory.EXPECT().NewVMHosts(gomock.Any()).Return(mockVMHostsAPI).Times(1)
 
 	// Mock successful VM host refresh
 	mockVMHostRefreshAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -3923,14 +3962,14 @@ func TestCanonicalMaasController_VMCompose_SubnetNotFoundCreateSubnetFailure(t *
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewSubnets().Return(mockSubnetAPI).Times(1)
+	factory.EXPECT().NewSubnets(gomock.Any()).Return(mockSubnetAPI).Times(1)
 
 	// Mock subnet creation failure in createSubnetAndIPRange
 	mockFabricAPI := mocks.NewMockBasisMaasAPI(ctrl)
 	mockFabricAPI.EXPECT().POST(gomock.Any(), gomock.Any()).Return(
 		nil, errors.New("fabric creation failed"))
 
-	factory.EXPECT().NewFabrics().Return(mockFabricAPI).Times(1)
+	factory.EXPECT().NewFabrics(gomock.Any()).Return(mockFabricAPI).Times(1)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
@@ -3939,6 +3978,7 @@ func TestCanonicalMaasController_VMCompose_SubnetNotFoundCreateSubnetFailure(t *
 			cmdExecuteOutput: []byte("ansible successfully"),
 			cmdExecuteErr:    nil,
 		},
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -3961,6 +4001,7 @@ func TestCanonicalMaasController_VMCompose_SubnetNotFoundCreateSubnetFailure(t *
 }
 
 func TestCanonicalMaasController_VMCompose_SubnetNotFoundCreateSubnetSuccess(t *testing.T) {
+	t.Setenv("MAAS_RUN_MODE", "worker")
 	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
 	defer cleanup()
 
@@ -4020,7 +4061,7 @@ func TestCanonicalMaasController_VMCompose_SubnetNotFoundCreateSubnetSuccess(t *
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewMachineSystemID("host-system-id").Return(mockMachineAPI).Times(1)
+	factory.EXPECT().NewMachineSystemID("host-system-id", gomock.Any()).Return(mockMachineAPI).Times(1)
 
 	// Mock successful getHostID
 	mockVMHostsAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -4037,7 +4078,7 @@ func TestCanonicalMaasController_VMCompose_SubnetNotFoundCreateSubnetSuccess(t *
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewVMHosts().Return(mockVMHostsAPI).Times(1)
+	factory.EXPECT().NewVMHosts(gomock.Any()).Return(mockVMHostsAPI).Times(1)
 
 	// Mock successful VM host refresh
 	mockVMHostRefreshAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -4061,7 +4102,7 @@ func TestCanonicalMaasController_VMCompose_SubnetNotFoundCreateSubnetSuccess(t *
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 201},
 		}, nil)
 
-	factory.EXPECT().NewSubnets().Return(mockSubnetAPI).Times(2)
+	factory.EXPECT().NewSubnets(gomock.Any()).Return(mockSubnetAPI).Times(2)
 
 	mockFabricAPI := mocks.NewMockBasisMaasAPI(ctrl)
 	mockFabricAPI.EXPECT().POST(gomock.Any(), gomock.Any()).Return(
@@ -4073,7 +4114,7 @@ func TestCanonicalMaasController_VMCompose_SubnetNotFoundCreateSubnetSuccess(t *
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 201},
 		}, nil)
 
-	factory.EXPECT().NewFabrics().Return(mockFabricAPI).Times(1)
+	factory.EXPECT().NewFabrics(gomock.Any()).Return(mockFabricAPI).Times(1)
 
 	// Mock VM compose
 	mockVMComposeAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -4100,7 +4141,7 @@ func TestCanonicalMaasController_VMCompose_SubnetNotFoundCreateSubnetSuccess(t *
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil).AnyTimes()
 
-	factory.EXPECT().NewMachineSystemID("composed-vm-system-id").Return(mockPollingAPI).Times(1)
+	factory.EXPECT().NewMachineSystemID("composed-vm-system-id", gomock.Any()).Return(mockPollingAPI).Times(1)
 
 	// Mock getInterfaceList
 	mockInterfaceListAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -4116,24 +4157,25 @@ func TestCanonicalMaasController_VMCompose_SubnetNotFoundCreateSubnetSuccess(t *
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewInterfaces("composed-vm-system-id").Return(mockInterfaceListAPI).Times(1)
+	factory.EXPECT().NewInterfaces("composed-vm-system-id", gomock.Any()).Return(mockInterfaceListAPI).Times(1)
 
 	// Mock linkSubnetInterface operations
 	mockDisconnectAPI := mocks.NewMockBasisMaasAPI(ctrl)
 	mockDisconnectAPI.EXPECT().POST(gomock.Any(), gomock.Any()).Return(
 		response_body.ResbodyCommon{HTTPStatus: 200}, nil)
 
-	factory.EXPECT().NewInterfaceDisconnect("composed-vm-system-id", 1).Return(mockDisconnectAPI).Times(1)
+	factory.EXPECT().NewInterfaceDisconnect("composed-vm-system-id", 1, gomock.Any()).Return(mockDisconnectAPI).Times(1)
 
 	mockLinkAPI := mocks.NewMockBasisMaasAPI(ctrl)
 	mockLinkAPI.EXPECT().POST(gomock.Any(), gomock.Any()).Return(
 		response_body.ResbodyCommon{HTTPStatus: 200}, nil)
 
-	factory.EXPECT().NewInterfaceLink("composed-vm-system-id", 1).Return(mockLinkAPI).Times(1)
+	factory.EXPECT().NewInterfaceLink("composed-vm-system-id", 1, gomock.Any()).Return(mockLinkAPI).Times(1)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -4162,6 +4204,7 @@ func TestCanonicalMaasController_VMCompose_SubnetNotFoundCreateSubnetSuccess(t *
 
 // Test case: VMCompose goroutine - pollingMachineStatus failure
 func TestCanonicalMaasController_VMCompose_GoroutinePollingFailure(t *testing.T) {
+	t.Setenv("MAAS_RUN_MODE", "worker")
 	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
 	defer cleanup()
 
@@ -4197,7 +4240,7 @@ func TestCanonicalMaasController_VMCompose_GoroutinePollingFailure(t *testing.T)
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewMachineSystemID("host-system-id").Return(mockMachineAPI).Times(1)
+	factory.EXPECT().NewMachineSystemID("host-system-id", gomock.Any()).Return(mockMachineAPI).Times(1)
 
 	mockVMHostsAPI := mocks.NewMockBasisMaasAPI(ctrl)
 	mockVMHostsAPI.EXPECT().GET(gomock.Any()).Return(
@@ -4213,7 +4256,7 @@ func TestCanonicalMaasController_VMCompose_GoroutinePollingFailure(t *testing.T)
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewVMHosts().Return(mockVMHostsAPI).Times(1)
+	factory.EXPECT().NewVMHosts(gomock.Any()).Return(mockVMHostsAPI).Times(1)
 
 	mockVMHostRefreshAPI := mocks.NewMockBasisMaasAPI(ctrl)
 	mockVMHostRefreshAPI.EXPECT().POST(gomock.Any(), gomock.Any()).Return(
@@ -4228,7 +4271,7 @@ func TestCanonicalMaasController_VMCompose_GoroutinePollingFailure(t *testing.T)
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewSubnets().Return(mockSubnetAPI).Times(1)
+	factory.EXPECT().NewSubnets(gomock.Any()).Return(mockSubnetAPI).Times(1)
 
 	mockVMComposeAPI := mocks.NewMockBasisMaasAPI(ctrl)
 	mockVMComposeAPI.EXPECT().POST(gomock.Any(), gomock.Any()).Return(
@@ -4244,7 +4287,7 @@ func TestCanonicalMaasController_VMCompose_GoroutinePollingFailure(t *testing.T)
 	mockPollingAPI.EXPECT().GET(gomock.Any()).Return(
 		nil, errors.New("polling machine status failed"))
 
-	factory.EXPECT().NewMachineSystemID("composed-vm-system-id").Return(mockPollingAPI).Times(1)
+	factory.EXPECT().NewMachineSystemID("composed-vm-system-id", gomock.Any()).Return(mockPollingAPI).Times(1)
 
 	// Mock markBroken call
 	mockMarkBrokenAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -4256,6 +4299,7 @@ func TestCanonicalMaasController_VMCompose_GoroutinePollingFailure(t *testing.T)
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -4279,6 +4323,7 @@ func TestCanonicalMaasController_VMCompose_GoroutinePollingFailure(t *testing.T)
 
 // Test case: VMCompose goroutine - getInterfaceList failure
 func TestCanonicalMaasController_VMCompose_GoroutineGetInterfaceListFailure(t *testing.T) {
+	t.Setenv("MAAS_RUN_MODE", "worker")
 	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
 	defer cleanup()
 
@@ -4321,7 +4366,7 @@ func TestCanonicalMaasController_VMCompose_GoroutineGetInterfaceListFailure(t *t
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewMachineSystemID("host-system-id").Return(mockMachineAPI).Times(1)
+	factory.EXPECT().NewMachineSystemID("host-system-id", gomock.Any()).Return(mockMachineAPI).Times(1)
 
 	mockVMHostsAPI := mocks.NewMockBasisMaasAPI(ctrl)
 	mockVMHostsAPI.EXPECT().GET(gomock.Any()).Return(
@@ -4337,7 +4382,7 @@ func TestCanonicalMaasController_VMCompose_GoroutineGetInterfaceListFailure(t *t
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewVMHosts().Return(mockVMHostsAPI).Times(1)
+	factory.EXPECT().NewVMHosts(gomock.Any()).Return(mockVMHostsAPI).Times(1)
 
 	mockVMHostRefreshAPI := mocks.NewMockBasisMaasAPI(ctrl)
 	mockVMHostRefreshAPI.EXPECT().POST(gomock.Any(), gomock.Any()).Return(
@@ -4354,7 +4399,7 @@ func TestCanonicalMaasController_VMCompose_GoroutineGetInterfaceListFailure(t *t
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewSubnets().Return(mockSubnetAPI).Times(1)
+	factory.EXPECT().NewSubnets(gomock.Any()).Return(mockSubnetAPI).Times(1)
 
 	mockVMComposeAPI := mocks.NewMockBasisMaasAPI(ctrl)
 	mockVMComposeAPI.EXPECT().POST(gomock.Any(), gomock.Any()).Return(
@@ -4374,14 +4419,14 @@ func TestCanonicalMaasController_VMCompose_GoroutineGetInterfaceListFailure(t *t
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewMachineSystemID("composed-vm-system-id").Return(mockPollingAPI).Times(1)
+	factory.EXPECT().NewMachineSystemID("composed-vm-system-id", gomock.Any()).Return(mockPollingAPI).Times(1)
 
 	// Mock getInterfaceList failure
 	mockInterfaceAPI := mocks.NewMockBasisMaasAPI(ctrl)
 	mockInterfaceAPI.EXPECT().GET(gomock.Any()).Return(
 		nil, errors.New("get interface list failed"))
 
-	factory.EXPECT().NewInterfaces("composed-vm-system-id").Return(mockInterfaceAPI).Times(1)
+	factory.EXPECT().NewInterfaces("composed-vm-system-id", gomock.Any()).Return(mockInterfaceAPI).Times(1)
 
 	// Mock markBroken call
 	mockMarkBrokenAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -4393,6 +4438,7 @@ func TestCanonicalMaasController_VMCompose_GoroutineGetInterfaceListFailure(t *t
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -4416,6 +4462,7 @@ func TestCanonicalMaasController_VMCompose_GoroutineGetInterfaceListFailure(t *t
 
 // Test case: VMCompose goroutine - linkSubnetInterface failure
 func TestCanonicalMaasController_VMCompose_GoroutineLinkSubnetInterfaceFailure(t *testing.T) {
+	t.Setenv("MAAS_RUN_MODE", "worker")
 	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
 	defer cleanup()
 
@@ -4458,7 +4505,7 @@ func TestCanonicalMaasController_VMCompose_GoroutineLinkSubnetInterfaceFailure(t
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewMachineSystemID("host-system-id").Return(mockMachineAPI).Times(1)
+	factory.EXPECT().NewMachineSystemID("host-system-id", gomock.Any()).Return(mockMachineAPI).Times(1)
 
 	mockVMHostsAPI := mocks.NewMockBasisMaasAPI(ctrl)
 	mockVMHostsAPI.EXPECT().GET(gomock.Any()).Return(
@@ -4474,7 +4521,7 @@ func TestCanonicalMaasController_VMCompose_GoroutineLinkSubnetInterfaceFailure(t
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewVMHosts().Return(mockVMHostsAPI).Times(1)
+	factory.EXPECT().NewVMHosts(gomock.Any()).Return(mockVMHostsAPI).Times(1)
 
 	mockVMHostRefreshAPI := mocks.NewMockBasisMaasAPI(ctrl)
 	mockVMHostRefreshAPI.EXPECT().POST(gomock.Any(), gomock.Any()).Return(
@@ -4491,7 +4538,7 @@ func TestCanonicalMaasController_VMCompose_GoroutineLinkSubnetInterfaceFailure(t
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewSubnets().Return(mockSubnetAPI).Times(1)
+	factory.EXPECT().NewSubnets(gomock.Any()).Return(mockSubnetAPI).Times(1)
 
 	mockVMComposeAPI := mocks.NewMockBasisMaasAPI(ctrl)
 	mockVMComposeAPI.EXPECT().POST(gomock.Any(), gomock.Any()).Return(
@@ -4511,7 +4558,7 @@ func TestCanonicalMaasController_VMCompose_GoroutineLinkSubnetInterfaceFailure(t
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewMachineSystemID("composed-vm-system-id").Return(mockPollingAPI).Times(1)
+	factory.EXPECT().NewMachineSystemID("composed-vm-system-id", gomock.Any()).Return(mockPollingAPI).Times(1)
 
 	// Mock successful getInterfaceList
 	mockInterfaceAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -4527,14 +4574,14 @@ func TestCanonicalMaasController_VMCompose_GoroutineLinkSubnetInterfaceFailure(t
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewInterfaces("composed-vm-system-id").Return(mockInterfaceAPI).Times(1)
+	factory.EXPECT().NewInterfaces("composed-vm-system-id", gomock.Any()).Return(mockInterfaceAPI).Times(1)
 
 	// Mock interface disconnect failure
 	mockDisconnectAPI := mocks.NewMockBasisMaasAPI(ctrl)
 	mockDisconnectAPI.EXPECT().POST(gomock.Any(), gomock.Any()).Return(
 		nil, errors.New("interface disconnect failed"))
 
-	factory.EXPECT().NewInterfaceDisconnect("composed-vm-system-id", 1).Return(mockDisconnectAPI).Times(1)
+	factory.EXPECT().NewInterfaceDisconnect("composed-vm-system-id", 1, gomock.Any()).Return(mockDisconnectAPI).Times(1)
 
 	// Mock markBroken call
 	mockMarkBrokenAPI := mocks.NewMockBasisMaasAPI(ctrl)
@@ -4546,6 +4593,7 @@ func TestCanonicalMaasController_VMCompose_GoroutineLinkSubnetInterfaceFailure(t
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -4621,6 +4669,7 @@ func TestCanonicalMaasController_VMDelete_AllPaths(t *testing.T) {
 			controller := CanonicalMaasController{
 				Logger:     klog.NewKlogr(),
 				APIFactory: mockFactory,
+				JobManager: async_job.NewInMemoryJobManager(),
 			}
 
 			ctx := context.Background()
@@ -4709,6 +4758,7 @@ func TestCanonicalMaasController_MachineShow_AllPaths(t *testing.T) {
 			controller := CanonicalMaasController{
 				Logger:     klog.NewKlogr(),
 				APIFactory: mockFactory,
+				JobManager: async_job.NewInMemoryJobManager(),
 			}
 
 			ctx := context.Background()
@@ -4854,6 +4904,7 @@ func TestCanonicalMaasController_Cancel_AllPaths(t *testing.T) {
 			controller := CanonicalMaasController{
 				Logger:     klog.NewKlogr(),
 				APIFactory: mockFactory,
+				JobManager: async_job.NewInMemoryJobManager(),
 			}
 
 			ctx := context.Background()
@@ -4902,6 +4953,7 @@ func TestCanonicalMaasController_HelperFunctions(t *testing.T) {
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: mockFactory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -4921,7 +4973,7 @@ func TestCanonicalMaasController_HelperFunctions(t *testing.T) {
 				t.Logf("Expected panic due to mock limitations: %v", r)
 			}
 		}()
-		_, err := controller.createSubnetAndIPRange(ctx, macToFabric, "00:11:22:33:44:55", "192.168.1.0/24", "192.168.1.10", "192.168.1.50")
+		_, err := controller.createSubnetAndIPRange(ctx, macToFabric, "00:11:22:33:44:55", "192.168.1.0/24", "192.168.1.10", "192.168.1.50", false)
 		if err != nil {
 			t.Logf("Expected error due to mock limitations: %v", err)
 		}
@@ -4934,7 +4986,7 @@ func TestCanonicalMaasController_HelperFunctions(t *testing.T) {
 		// Test linkSubnetInterface with proper arguments
 		interfaces := []response_body.Interface{}
 		subnetLinks := map[string]SubnetLinkPair{}
-		err := controller.linkSubnetInterface(ctx, "test-sys", interfaces, subnetLinks, "00:11:22:33:44:55", false, nil)
+		err := controller.linkSubnetInterface(ctx, "test-sys", interfaces, subnetLinks, "00:11:22:33:44:55", false, nil, false)
 		if err != nil {
 			t.Logf("Expected error due to mock limitations: %v", err)
 		}
@@ -4945,7 +4997,7 @@ func TestCanonicalMaasController_HelperFunctions(t *testing.T) {
 		defer cleanup()
 
 		// Test getMachineAccessInfo with proper return values
-		_, _, _, _, _, _, _, _, err := controller.getMachineAccessInfo(ctx, "test-sys")
+		_, _, _, _, _, _, _, _, err := controller.getMachineAccessInfo(ctx, "test-sys", false)
 		if err != nil {
 			t.Logf("Expected error due to mock limitations: %v", err)
 		}
@@ -4956,7 +5008,7 @@ func TestCanonicalMaasController_HelperFunctions(t *testing.T) {
 		defer cleanup()
 
 		// Test internalCommission
-		err := controller.internalCommission(ctx, "test-sys")
+		err := controller.internalCommission(ctx, "test-sys", false)
 		if err != nil {
 			t.Logf("Expected error due to mock limitations: %v", err)
 		}
@@ -4988,10 +5040,11 @@ func TestCanonicalMaasController_internalCommission_DetailedPaths(t *testing.T) 
 		controller := CanonicalMaasController{
 			Logger:     klog.NewKlogr(),
 			APIFactory: mockFactory,
+			JobManager: async_job.NewInMemoryJobManager(),
 		}
 
 		// Act
-		err := controller.internalCommission(ctx, "test-system-id")
+		err := controller.internalCommission(ctx, "test-system-id", false)
 
 		// Assert
 		if err == nil {
@@ -5026,10 +5079,11 @@ func TestCanonicalMaasController_internalCommission_DetailedPaths(t *testing.T) 
 		controller := CanonicalMaasController{
 			Logger:     klog.NewKlogr(),
 			APIFactory: mockFactory,
+			JobManager: async_job.NewInMemoryJobManager(),
 		}
 
 		// Act
-		err := controller.internalCommission(ctx, "test-system-id")
+		err := controller.internalCommission(ctx, "test-system-id", false)
 
 		// Assert
 		if err != nil {
@@ -5060,10 +5114,11 @@ func TestCanonicalMaasController_internalCommission_DetailedPaths(t *testing.T) 
 		controller := CanonicalMaasController{
 			Logger:     klog.NewKlogr(),
 			APIFactory: mockFactory,
+			JobManager: async_job.NewInMemoryJobManager(),
 		}
 
 		// Act
-		err := controller.internalCommission(ctx, "test-system-id")
+		err := controller.internalCommission(ctx, "test-system-id", false)
 
 		// Assert
 		if err == nil {
@@ -5094,10 +5149,11 @@ func TestCanonicalMaasController_internalCommission_DetailedPaths(t *testing.T) 
 		controller := CanonicalMaasController{
 			Logger:     klog.NewKlogr(),
 			APIFactory: mockFactory,
+			JobManager: async_job.NewInMemoryJobManager(),
 		}
 
 		// Act
-		err := controller.internalCommission(ctx, "test-system-id")
+		err := controller.internalCommission(ctx, "test-system-id", false)
 
 		// Assert
 		if err == nil {
@@ -5161,10 +5217,11 @@ func TestCanonicalMaasController_PollingMachineStatus_AllPaths(t *testing.T) {
 			controller := CanonicalMaasController{
 				Logger:     klog.NewKlogr(),
 				APIFactory: mockFactory,
+				JobManager: async_job.NewInMemoryJobManager(),
 			}
 
 			ctx := context.Background()
-			err := controller.pollingMachineStatus(ctx, "test-sys", 100*time.Millisecond, tc.checkStatus)
+			err := controller.pollingMachineStatus(ctx, "test-sys", 100*time.Millisecond, tc.checkStatus, false)
 
 			if tc.expectError && err == nil {
 				t.Error("Expected error but got nil")
@@ -5192,11 +5249,12 @@ func TestCanonicalMaasController_pollingMachineStatus_RequiresMultiplePolls(t *t
 	mockMachineAPI := &mockBasisMaasAPIMultipleStatusChanges{
 		statuses: []string{"Commissioning", "Commissioning", "Ready"},
 	}
-	factory.EXPECT().NewMachineSystemID("test-system-id").Return(mockMachineAPI).Times(3)
+	factory.EXPECT().NewMachineSystemID("test-system-id", gomock.Any()).Return(mockMachineAPI).Times(3)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -5207,7 +5265,7 @@ func TestCanonicalMaasController_pollingMachineStatus_RequiresMultiplePolls(t *t
 	start := time.Now()
 
 	// Act
-	err := controller.pollingMachineStatus(ctx, systemID, pollingInterval, checkStatus)
+	err := controller.pollingMachineStatus(ctx, systemID, pollingInterval, checkStatus, false)
 
 	elapsed := time.Since(start)
 
@@ -5239,17 +5297,18 @@ func TestCanonicalMaasController_getSubnetList_TypeCastFailure(t *testing.T) {
 	mockAPI := &mockBasisMaasAPIWrongType{
 		returnWrongType: true,
 	}
-	factory.EXPECT().NewSubnets().Return(mockAPI).Times(1)
+	factory.EXPECT().NewSubnets(gomock.Any()).Return(mockAPI).Times(1)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
 
 	// Act
-	subnets, err := controller.getSubnetList(ctx)
+	subnets, err := controller.getSubnetList(ctx, false)
 
 	// Assert
 	if err == nil {
@@ -5276,11 +5335,12 @@ func TestCanonicalMaasController_createSubnetAndIPRange_FabricCreationFailure(t 
 	mockFabricAPI := &mockBasisMaasAPIWithError{
 		err: errors.New("fabric creation failed"),
 	}
-	factory.EXPECT().NewFabrics().Return(mockFabricAPI).Times(1)
+	factory.EXPECT().NewFabrics(gomock.Any()).Return(mockFabricAPI).Times(1)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -5289,7 +5349,7 @@ func TestCanonicalMaasController_createSubnetAndIPRange_FabricCreationFailure(t 
 	cidr := "192.168.1.0/24"
 
 	// Act
-	subnetID, err := controller.createSubnetAndIPRange(ctx, macToFabric, mac, cidr, "", "")
+	subnetID, err := controller.createSubnetAndIPRange(ctx, macToFabric, mac, cidr, "", "", false)
 
 	// Assert
 	if err == nil {
@@ -5316,11 +5376,12 @@ func TestCanonicalMaasController_createSubnetAndIPRange_FabricTypeCastFailure(t 
 	mockFabricAPI := &mockBasisMaasAPIWrongType{
 		returnWrongType: true,
 	}
-	factory.EXPECT().NewFabrics().Return(mockFabricAPI).Times(1)
+	factory.EXPECT().NewFabrics(gomock.Any()).Return(mockFabricAPI).Times(1)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -5329,7 +5390,7 @@ func TestCanonicalMaasController_createSubnetAndIPRange_FabricTypeCastFailure(t 
 	cidr := "192.168.1.0/24"
 
 	// Act
-	subnetID, err := controller.createSubnetAndIPRange(ctx, macToFabric, mac, cidr, "", "")
+	subnetID, err := controller.createSubnetAndIPRange(ctx, macToFabric, mac, cidr, "", "", false)
 
 	// Assert
 	if err == nil {
@@ -5356,11 +5417,12 @@ func TestCanonicalMaasController_createSubnetAndIPRange_SubnetCreationFailure(t 
 	mockSubnetAPI := &mockBasisMaasAPIWithError{
 		err: errors.New("subnet creation failed"),
 	}
-	factory.EXPECT().NewSubnets().Return(mockSubnetAPI).Times(1)
+	factory.EXPECT().NewSubnets(gomock.Any()).Return(mockSubnetAPI).Times(1)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -5373,7 +5435,7 @@ func TestCanonicalMaasController_createSubnetAndIPRange_SubnetCreationFailure(t 
 	addEnd := "192.168.1.20"
 
 	// Act
-	_, err := controller.createSubnetAndIPRange(ctx, macToFabric, mac, cidr, addStart, addEnd)
+	_, err := controller.createSubnetAndIPRange(ctx, macToFabric, mac, cidr, addStart, addEnd, false)
 
 	// Assert
 	if err == nil {
@@ -5397,11 +5459,12 @@ func TestCanonicalMaasController_createSubnetAndIPRange_SubnetCreationCastFailur
 	mockSubnetAPI := &mockBasisMaasAPIWrongType{
 		returnWrongType: true,
 	}
-	factory.EXPECT().NewSubnets().Return(mockSubnetAPI).Times(1)
+	factory.EXPECT().NewSubnets(gomock.Any()).Return(mockSubnetAPI).Times(1)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -5414,7 +5477,7 @@ func TestCanonicalMaasController_createSubnetAndIPRange_SubnetCreationCastFailur
 	addEnd := "192.168.1.20"
 
 	// Act
-	_, err := controller.createSubnetAndIPRange(ctx, macToFabric, mac, cidr, addStart, addEnd)
+	_, err := controller.createSubnetAndIPRange(ctx, macToFabric, mac, cidr, addStart, addEnd, false)
 
 	// Assert
 	if err == nil {
@@ -5441,17 +5504,18 @@ func TestCanonicalMaasController_createSubnetAndIPRange_IPRangeCreationFailure(t
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 201},
 		},
 	}
-	factory.EXPECT().NewSubnets().Return(mockSubnetAPI).Times(1)
+	factory.EXPECT().NewSubnets(gomock.Any()).Return(mockSubnetAPI).Times(1)
 
 	// Mock IP range creation failure
 	mockIPRangeAPI := &mockBasisMaasAPIWithError{
 		err: errors.New("IP range creation failed"),
 	}
-	factory.EXPECT().NewIPRanges().Return(mockIPRangeAPI).Times(1)
+	factory.EXPECT().NewIPRanges(gomock.Any()).Return(mockIPRangeAPI).Times(1)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -5464,7 +5528,7 @@ func TestCanonicalMaasController_createSubnetAndIPRange_IPRangeCreationFailure(t
 	addEnd := "192.168.1.20"
 
 	// Act
-	_, err := controller.createSubnetAndIPRange(ctx, macToFabric, mac, cidr, addStart, addEnd)
+	_, err := controller.createSubnetAndIPRange(ctx, macToFabric, mac, cidr, addStart, addEnd, false)
 
 	// Assert
 	if err == nil {
@@ -5488,18 +5552,19 @@ func TestCanonicalMaasController_getInterfaceList_TypeCastFailure(t *testing.T) 
 	mockAPI := &mockBasisMaasAPIWrongType{
 		returnWrongType: true,
 	}
-	factory.EXPECT().NewInterfaces("test-system-id").Return(mockAPI).Times(1)
+	factory.EXPECT().NewInterfaces("test-system-id", gomock.Any()).Return(mockAPI).Times(1)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
 	systemID := "test-system-id"
 
 	// Act
-	interfaces, err := controller.getInterfaceList(ctx, systemID)
+	interfaces, err := controller.getInterfaceList(ctx, systemID, false)
 
 	// Assert
 	if err == nil {
@@ -5526,11 +5591,12 @@ func TestCanonicalMaasController_linkSubnetInterface_DisconnectFailure(t *testin
 	mockDisconnectAPI := &mockBasisMaasAPIWithError{
 		err: errors.New("interface disconnect failed"),
 	}
-	factory.EXPECT().NewInterfaceDisconnect("test-system-id", 1).Return(mockDisconnectAPI).Times(1)
+	factory.EXPECT().NewInterfaceDisconnect("test-system-id", 1, gomock.Any()).Return(mockDisconnectAPI).Times(1)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -5550,7 +5616,7 @@ func TestCanonicalMaasController_linkSubnetInterface_DisconnectFailure(t *testin
 	}
 
 	// Act
-	err := controller.linkSubnetInterface(ctx, systemID, interfaces, key2sub, "MacAddress", false, nil)
+	err := controller.linkSubnetInterface(ctx, systemID, interfaces, key2sub, "MacAddress", false, nil, false)
 
 	// Assert
 	if err == nil {
@@ -5574,17 +5640,18 @@ func TestCanonicalMaasController_linkSubnetInterface_LinkFailure(t *testing.T) {
 	mockDisconnectAPI := &mockBasisMaasAPI{
 		postResult: response_body.ResbodyCommon{HTTPStatus: 200},
 	}
-	factory.EXPECT().NewInterfaceDisconnect("test-system-id", 1).Return(mockDisconnectAPI).Times(1)
+	factory.EXPECT().NewInterfaceDisconnect("test-system-id", 1, gomock.Any()).Return(mockDisconnectAPI).Times(1)
 
 	// Mock link API failure
 	mockLinkAPI := &mockBasisMaasAPIWithError{
 		err: errors.New("interface link failed"),
 	}
-	factory.EXPECT().NewInterfaceLink("test-system-id", 1).Return(mockLinkAPI).Times(1)
+	factory.EXPECT().NewInterfaceLink("test-system-id", 1, gomock.Any()).Return(mockLinkAPI).Times(1)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -5604,7 +5671,7 @@ func TestCanonicalMaasController_linkSubnetInterface_LinkFailure(t *testing.T) {
 	}
 
 	// Act
-	err := controller.linkSubnetInterface(ctx, systemID, interfaces, key2sub, "MacAddress", false, nil)
+	err := controller.linkSubnetInterface(ctx, systemID, interfaces, key2sub, "MacAddress", false, nil, false)
 
 	// Assert
 	if err == nil {
@@ -5628,17 +5695,18 @@ func TestCanonicalMaasController_getHostList_TypeCastFailure(t *testing.T) {
 	mockAPI := &mockBasisMaasAPIWrongType{
 		returnWrongType: true,
 	}
-	factory.EXPECT().NewVMHosts().Return(mockAPI).Times(1)
+	factory.EXPECT().NewVMHosts(gomock.Any()).Return(mockAPI).Times(1)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
 
 	// Act
-	hosts, err := controller.getHostList(ctx)
+	hosts, err := controller.getHostList(ctx, false)
 
 	// Assert
 	if err == nil {
@@ -5665,18 +5733,19 @@ func TestCanonicalMaasController_getHostID_HostListFailure(t *testing.T) {
 	mockVMHostsAPI := &mockBasisMaasAPIWithError{
 		err: errors.New("get VM hosts failed"),
 	}
-	factory.EXPECT().NewVMHosts().Return(mockVMHostsAPI).Times(1)
+	factory.EXPECT().NewVMHosts(gomock.Any()).Return(mockVMHostsAPI).Times(1)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
 	systemID := "test-system-id"
 
 	// Act
-	hostID, err := controller.getHostID(ctx, systemID)
+	hostID, err := controller.getHostID(ctx, systemID, false)
 
 	// Assert
 	if err == nil {
@@ -5701,11 +5770,12 @@ func TestCanonicalMaasController_internalMachineShow_JSONMarshalFailure(t *testi
 
 	// Mock machine API that returns data causing JSON marshal failure
 	mockMachineAPI := &mockBasisMaasAPIUnmarshalableData{}
-	factory.EXPECT().NewMachineSystemID("test-system-id").Return(mockMachineAPI).Times(1)
+	factory.EXPECT().NewMachineSystemID("test-system-id", gomock.Any()).Return(mockMachineAPI).Times(1)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -5714,7 +5784,7 @@ func TestCanonicalMaasController_internalMachineShow_JSONMarshalFailure(t *testi
 	}
 
 	// Act
-	jsonStr, machineStatus, description, err := controller.internalMachineShow(ctx, request)
+	jsonStr, machineStatus, description, err := controller.internalMachineShow(ctx, request, false)
 
 	// Assert
 	if err == nil {
@@ -5784,18 +5854,19 @@ func TestCanonicalMaasController_getMachineAccessInfo_IPv4SubnetCoverage(t *test
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		},
 	}
-	factory.EXPECT().NewMachineSystemID("test-system-id").Return(mockMachineAPI).Times(1)
+	factory.EXPECT().NewMachineSystemID("test-system-id", gomock.Any()).Return(mockMachineAPI).Times(1)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
 	systemID := "test-system-id"
 
 	// Act
-	hostName, bootIf, accessAddress, bootMacAddress, subnetIDs, _, _, _, err := controller.getMachineAccessInfo(ctx, systemID)
+	hostName, bootIf, accessAddress, bootMacAddress, subnetIDs, _, _, _, err := controller.getMachineAccessInfo(ctx, systemID, false)
 
 	// Assert
 	if err != nil {
@@ -5978,7 +6049,7 @@ func TestCanonicalMaasController_createSubnetAndIPRange_NewFabricCreationSuccess
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 201},
 		},
 	}
-	factory.EXPECT().NewFabrics().Return(mockFabricAPI).Times(1)
+	factory.EXPECT().NewFabrics(gomock.Any()).Return(mockFabricAPI).Times(1)
 
 	// Mock successful subnet creation
 	mockSubnetAPI := &mockBasisMaasAPI{
@@ -5987,11 +6058,12 @@ func TestCanonicalMaasController_createSubnetAndIPRange_NewFabricCreationSuccess
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 201},
 		},
 	}
-	factory.EXPECT().NewSubnets().Return(mockSubnetAPI).Times(1)
+	factory.EXPECT().NewSubnets(gomock.Any()).Return(mockSubnetAPI).Times(1)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -6001,7 +6073,7 @@ func TestCanonicalMaasController_createSubnetAndIPRange_NewFabricCreationSuccess
 	cidr := "192.168.1.0/24"
 
 	// Act
-	subnetID, err := controller.createSubnetAndIPRange(ctx, macToFabric, mac, cidr, "", "")
+	subnetID, err := controller.createSubnetAndIPRange(ctx, macToFabric, mac, cidr, "", "", false)
 
 	// Assert
 	if err != nil {
@@ -6046,7 +6118,7 @@ func TestCanonicalMaasController_createSubnetAndIPRange_NewFabricWithIPRanges(t 
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 201},
 		},
 	}
-	factory.EXPECT().NewFabrics().Return(mockFabricAPI).Times(1)
+	factory.EXPECT().NewFabrics(gomock.Any()).Return(mockFabricAPI).Times(1)
 
 	// Mock successful subnet creation
 	mockSubnetAPI := &mockBasisMaasAPI{
@@ -6055,17 +6127,18 @@ func TestCanonicalMaasController_createSubnetAndIPRange_NewFabricWithIPRanges(t 
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 201},
 		},
 	}
-	factory.EXPECT().NewSubnets().Return(mockSubnetAPI).Times(1)
+	factory.EXPECT().NewSubnets(gomock.Any()).Return(mockSubnetAPI).Times(1)
 
 	// Mock successful IP range creation (called twice for two ranges)
 	mockIPRangeAPI := &mockBasisMaasAPI{
 		postResult: response_body.ResbodyCommon{HTTPStatus: 201},
 	}
-	factory.EXPECT().NewIPRanges().Return(mockIPRangeAPI).Times(2)
+	factory.EXPECT().NewIPRanges(gomock.Any()).Return(mockIPRangeAPI).Times(2)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -6076,7 +6149,7 @@ func TestCanonicalMaasController_createSubnetAndIPRange_NewFabricWithIPRanges(t 
 	addEnd := "10.0.0.150"
 
 	// Act
-	subnetID, err := controller.createSubnetAndIPRange(ctx, macToFabric, mac, cidr, addStart, addEnd)
+	subnetID, err := controller.createSubnetAndIPRange(ctx, macToFabric, mac, cidr, addStart, addEnd, false)
 
 	// Assert
 	if err != nil {
@@ -6115,17 +6188,18 @@ func TestCanonicalMaasController_linkSubnetInterface_ByName_Success(t *testing.T
 	mockDisconnectAPI := &mockBasisMaasAPI{
 		postResult: response_body.ResbodyCommon{HTTPStatus: 200},
 	}
-	factory.EXPECT().NewInterfaceDisconnect("test-system-id", 1).Return(mockDisconnectAPI).Times(1)
+	factory.EXPECT().NewInterfaceDisconnect("test-system-id", 1, gomock.Any()).Return(mockDisconnectAPI).Times(1)
 
 	// Mock successful link
 	mockLinkAPI := &mockBasisMaasAPI{
 		postResult: response_body.ResbodyCommon{HTTPStatus: 200},
 	}
-	factory.EXPECT().NewInterfaceLink("test-system-id", 1).Return(mockLinkAPI).Times(1)
+	factory.EXPECT().NewInterfaceLink("test-system-id", 1, gomock.Any()).Return(mockLinkAPI).Times(1)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -6151,7 +6225,7 @@ func TestCanonicalMaasController_linkSubnetInterface_ByName_Success(t *testing.T
 	}
 
 	// Act with keyName "Name" to test the else branch
-	err := controller.linkSubnetInterface(ctx, systemID, interfaces, key2sub, "Name", true, nil)
+	err := controller.linkSubnetInterface(ctx, systemID, interfaces, key2sub, "Name", true, nil, false)
 
 	// Assert
 	if err != nil {
@@ -6175,17 +6249,18 @@ func TestCanonicalMaasController_linkSubnetInterface_ByName_CaseInsensitive(t *t
 	mockDisconnectAPI := &mockBasisMaasAPI{
 		postResult: response_body.ResbodyCommon{HTTPStatus: 200},
 	}
-	factory.EXPECT().NewInterfaceDisconnect("test-system-id", 2).Return(mockDisconnectAPI).Times(1)
+	factory.EXPECT().NewInterfaceDisconnect("test-system-id", 2, gomock.Any()).Return(mockDisconnectAPI).Times(1)
 
 	// Mock successful link (called twice due to subnetIds: []int{2, 3})
 	mockLinkAPI := &mockBasisMaasAPI{
 		postResult: response_body.ResbodyCommon{HTTPStatus: 200},
 	}
-	factory.EXPECT().NewInterfaceLink("test-system-id", 2).Return(mockLinkAPI).Times(2)
+	factory.EXPECT().NewInterfaceLink("test-system-id", 2, gomock.Any()).Return(mockLinkAPI).Times(2)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -6206,9 +6281,50 @@ func TestCanonicalMaasController_linkSubnetInterface_ByName_CaseInsensitive(t *t
 	}
 
 	// Act with keyName "Name" and caseSensitivity false to test case insensitive name matching
-	err := controller.linkSubnetInterface(ctx, systemID, interfaces, key2sub, "Name", false, nil)
+	err := controller.linkSubnetInterface(ctx, systemID, interfaces, key2sub, "Name", false, nil, false)
 
 	// Assert
+	if err != nil {
+		t.Errorf("Expected no error, got: %v", err)
+	}
+}
+
+func TestCanonicalMaasController_linkSubnetInterface_SkipWhenAlreadyLinked(t *testing.T) {
+	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
+	defer cleanup()
+
+	setupTestEnvironmentForController(t)
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	factory := mocks.NewMockMaasAPIFactory(ctrl)
+
+	controller := CanonicalMaasController{
+		Logger:     klog.NewKlogr(),
+		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
+	}
+
+	interfaces := []response_body.Interface{
+		{
+			ID:         1,
+			Name:       "eth0",
+			MacAddress: "00:11:22:33:44:55",
+			Links: []response_body.Link{
+				{Subnet: response_body.Subnet{ID: 1}},
+				{Subnet: response_body.Subnet{ID: 2}},
+			},
+		},
+	}
+	key2sub := map[string]SubnetLinkPair{
+		"00:11:22:33:44:55": {
+			linkMode:  "AUTO",
+			subnetIds: []int{2, 1, 1},
+		},
+	}
+
+	err := controller.linkSubnetInterface(context.Background(), "test-system-id", interfaces, key2sub, "MacAddress", false, nil, false)
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
 	}
@@ -6226,13 +6342,13 @@ func TestCanonicalMaasController_linkSubnetInterface_WithMac2Name_RenameSuccess(
 	factory := mocks.NewMockMaasAPIFactory(ctrl)
 
 	mockDisconnectAPI := &mockBasisMaasAPI{postResult: response_body.ResbodyCommon{HTTPStatus: 200}}
-	factory.EXPECT().NewInterfaceDisconnect("test-system-id", 1).Return(mockDisconnectAPI).Times(1)
+	factory.EXPECT().NewInterfaceDisconnect("test-system-id", 1, gomock.Any()).Return(mockDisconnectAPI).Times(1)
 
 	mockLinkAPI := &mockBasisMaasAPI{postResult: response_body.ResbodyCommon{HTTPStatus: 200}}
-	factory.EXPECT().NewInterfaceLink("test-system-id", 1).Return(mockLinkAPI).Times(1)
+	factory.EXPECT().NewInterfaceLink("test-system-id", 1, gomock.Any()).Return(mockLinkAPI).Times(1)
 
 	mockUpdateAPI := mocks.NewMockBasisMaasAPI(ctrl)
-	factory.EXPECT().NewInterfaceUpdate("test-system-id", 1).Return(mockUpdateAPI).Times(1)
+	factory.EXPECT().NewInterfaceUpdate("test-system-id", 1, gomock.Any()).Return(mockUpdateAPI).Times(1)
 	mockUpdateAPI.EXPECT().PUT(gomock.Any(), gomock.Any()).DoAndReturn(
 		func(ctx context.Context, reqBody request_body.Reqbody) (response_body.Resbody, error) {
 			updateReq, ok := reqBody.(request_body.ReqbodyInterfaceUpdate)
@@ -6249,6 +6365,7 @@ func TestCanonicalMaasController_linkSubnetInterface_WithMac2Name_RenameSuccess(
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	interfaces := []response_body.Interface{{
@@ -6261,7 +6378,7 @@ func TestCanonicalMaasController_linkSubnetInterface_WithMac2Name_RenameSuccess(
 	}
 	mac2name := map[string]string{"00:11:22:33:44:55": "eth0"}
 
-	err := controller.linkSubnetInterface(context.Background(), "test-system-id", interfaces, key2sub, "MacAddress", false, mac2name)
+	err := controller.linkSubnetInterface(context.Background(), "test-system-id", interfaces, key2sub, "MacAddress", false, mac2name, false)
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
 	}
@@ -6279,17 +6396,18 @@ func TestCanonicalMaasController_linkSubnetInterface_WithMac2Name_RenameFailure(
 	factory := mocks.NewMockMaasAPIFactory(ctrl)
 
 	mockDisconnectAPI := &mockBasisMaasAPI{postResult: response_body.ResbodyCommon{HTTPStatus: 200}}
-	factory.EXPECT().NewInterfaceDisconnect("test-system-id", 1).Return(mockDisconnectAPI).Times(1)
+	factory.EXPECT().NewInterfaceDisconnect("test-system-id", 1, gomock.Any()).Return(mockDisconnectAPI).Times(1)
 
 	mockLinkAPI := &mockBasisMaasAPI{postResult: response_body.ResbodyCommon{HTTPStatus: 200}}
-	factory.EXPECT().NewInterfaceLink("test-system-id", 1).Return(mockLinkAPI).Times(1)
+	factory.EXPECT().NewInterfaceLink("test-system-id", 1, gomock.Any()).Return(mockLinkAPI).Times(1)
 
 	mockUpdateAPI := &mockBasisMaasAPIWithError{err: errors.New("interface rename failed")}
-	factory.EXPECT().NewInterfaceUpdate("test-system-id", 1).Return(mockUpdateAPI).Times(1)
+	factory.EXPECT().NewInterfaceUpdate("test-system-id", 1, gomock.Any()).Return(mockUpdateAPI).Times(1)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	interfaces := []response_body.Interface{{
@@ -6302,7 +6420,7 @@ func TestCanonicalMaasController_linkSubnetInterface_WithMac2Name_RenameFailure(
 	}
 	mac2name := map[string]string{"00:11:22:33:44:55": "eth0"}
 
-	err := controller.linkSubnetInterface(context.Background(), "test-system-id", interfaces, key2sub, "MacAddress", false, mac2name)
+	err := controller.linkSubnetInterface(context.Background(), "test-system-id", interfaces, key2sub, "MacAddress", false, mac2name, false)
 	if err == nil {
 		t.Error("Expected interface rename error, got nil")
 	}
@@ -6320,14 +6438,15 @@ func TestCanonicalMaasController_linkSubnetInterface_WithMac2Name_SameNameSkipsR
 	factory := mocks.NewMockMaasAPIFactory(ctrl)
 
 	mockDisconnectAPI := &mockBasisMaasAPI{postResult: response_body.ResbodyCommon{HTTPStatus: 200}}
-	factory.EXPECT().NewInterfaceDisconnect("test-system-id", 1).Return(mockDisconnectAPI).Times(1)
+	factory.EXPECT().NewInterfaceDisconnect("test-system-id", 1, gomock.Any()).Return(mockDisconnectAPI).Times(1)
 
 	mockLinkAPI := &mockBasisMaasAPI{postResult: response_body.ResbodyCommon{HTTPStatus: 200}}
-	factory.EXPECT().NewInterfaceLink("test-system-id", 1).Return(mockLinkAPI).Times(1)
+	factory.EXPECT().NewInterfaceLink("test-system-id", 1, gomock.Any()).Return(mockLinkAPI).Times(1)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	interfaces := []response_body.Interface{{
@@ -6340,7 +6459,7 @@ func TestCanonicalMaasController_linkSubnetInterface_WithMac2Name_SameNameSkipsR
 	}
 	mac2name := map[string]string{"00:11:22:33:44:55": "eth0"}
 
-	err := controller.linkSubnetInterface(context.Background(), "test-system-id", interfaces, key2sub, "MacAddress", false, mac2name)
+	err := controller.linkSubnetInterface(context.Background(), "test-system-id", interfaces, key2sub, "MacAddress", false, mac2name, false)
 	if err != nil {
 		t.Errorf("Expected no error, got: %v", err)
 	}
@@ -6372,13 +6491,14 @@ func TestCanonicalMaasController_getMachineAccessInfo_APIGetFailure(t *testing.T
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
 	systemID := "test-system-id"
 
 	// Act
-	hostName, bootIf, accessAddress, bootMacAddress, subnetIDs, _, _, _, err := controller.getMachineAccessInfo(ctx, systemID)
+	hostName, bootIf, accessAddress, bootMacAddress, subnetIDs, _, _, _, err := controller.getMachineAccessInfo(ctx, systemID, false)
 
 	// Assert
 	if err == nil {
@@ -6433,13 +6553,14 @@ func TestCanonicalMaasController_getMachineAccessInfo_TypeCastFailure(t *testing
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
 	systemID := "test-system-id"
 
 	// Act
-	hostName, bootIf, accessAddress, bootMacAddress, subnetIDs, _, _, _, err := controller.getMachineAccessInfo(ctx, systemID)
+	hostName, bootIf, accessAddress, bootMacAddress, subnetIDs, _, _, _, err := controller.getMachineAccessInfo(ctx, systemID, false)
 
 	// Assert
 	if err == nil {
@@ -6497,6 +6618,7 @@ func TestCanonicalMaasController_OsDeploy_MachineDeploymentFailure(t *testing.T)
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -6563,7 +6685,7 @@ func TestCanonicalMaasController_OsRelease_VMHostDeletionSuccess(t *testing.T) {
 		}, nil)
 
 	factory.EXPECT().
-		NewVMHosts().
+		NewVMHosts(gomock.Any()).
 		Return(mockVMHostsAPI).
 		Times(1)
 
@@ -6671,6 +6793,7 @@ Tags:       []string{"192.168.1.100/24"},
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
 		Ansible:    mockAnsible,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -6724,7 +6847,7 @@ func TestCanonicalMaasController_OsRelease_VMHostDeletionFailure(t *testing.T) {
 		}, nil)
 
 	factory.EXPECT().
-		NewVMHosts().
+		NewVMHosts(gomock.Any()).
 		Return(mockVMHostsAPI).
 		Times(1)
 
@@ -6742,6 +6865,7 @@ func TestCanonicalMaasController_OsRelease_VMHostDeletionFailure(t *testing.T) {
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -6799,7 +6923,7 @@ func TestCanonicalMaasController_OsRelease_VMHostNotFound(t *testing.T) {
 		}, nil)
 
 	factory.EXPECT().
-		NewVMHosts().
+		NewVMHosts(gomock.Any()).
 		Return(mockVMHostsAPI).
 		Times(1)
 
@@ -6865,6 +6989,7 @@ func TestCanonicalMaasController_OsRelease_VMHostNotFound(t *testing.T) {
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
 		Ansible:    mockAnsible,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -6915,6 +7040,7 @@ func TestCanonicalMaasController_MachineList_ResponseTypeCastFailure(t *testing.
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -6970,7 +7096,7 @@ func TestCanonicalMaasController_OsRelease_GetMachineAccessInfoFailure(t *testin
 		}, nil)
 
 	factory.EXPECT().
-		NewVMHosts().
+		NewVMHosts(gomock.Any()).
 		Return(mockVMHostsAPI).
 		Times(1)
 
@@ -6988,6 +7114,7 @@ func TestCanonicalMaasController_OsRelease_GetMachineAccessInfoFailure(t *testin
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -7038,7 +7165,7 @@ func TestCanonicalMaasController_OsRelease_MachineReleaseFailure(t *testing.T) {
 		}, nil)
 
 	factory.EXPECT().
-		NewVMHosts().
+		NewVMHosts(gomock.Any()).
 		Return(mockVMHostsAPI).
 		Times(1)
 
@@ -7092,6 +7219,7 @@ func TestCanonicalMaasController_OsRelease_MachineReleaseFailure(t *testing.T) {
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
 		Ansible:    mockAnsible,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -7142,7 +7270,7 @@ func TestCanonicalMaasController_OsRelease_GetMachineAccessInfoTypeCastFailure(t
 		}, nil)
 
 	factory.EXPECT().
-		NewVMHosts().
+		NewVMHosts(gomock.Any()).
 		Return(mockVMHostsAPI).
 		Times(1)
 
@@ -7160,6 +7288,7 @@ func TestCanonicalMaasController_OsRelease_GetMachineAccessInfoTypeCastFailure(t
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -7190,6 +7319,7 @@ func TestCanonicalMaasController_OsRelease_GetMachineAccessInfoTypeCastFailure(t
 
 // Test case: MachineRegister goroutine - getSubnetList failure
 func TestCanonicalMaasController_MachineRegister_GetSubnetListFailure(t *testing.T) {
+	t.Setenv("MAAS_RUN_MODE", "worker")
 	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
 	defer cleanup()
 
@@ -7226,13 +7356,13 @@ func TestCanonicalMaasController_MachineRegister_GetSubnetListFailure(t *testing
 		}, nil)
 
 	// Mock successful commission
-	mockFactory.EXPECT().NewMachineCommission("test-system-id").Return(mockCommissionAPI)
+	mockFactory.EXPECT().NewMachineCommission("test-system-id", gomock.Any()).Return(mockCommissionAPI)
 	mockCommissionAPI.EXPECT().POST(gomock.Any(), gomock.Any()).Return(
 		response_body.ResbodyCommon{HTTPStatus: 200}, nil)
 
 	// Mock machine status polling (commission success)
 	mockMachineStatusAPI := mocks.NewMockBasisMaasAPI(ctrl)
-	mockFactory.EXPECT().NewMachineSystemID("test-system-id").Return(mockMachineStatusAPI).Times(1)
+	mockFactory.EXPECT().NewMachineSystemID("test-system-id", gomock.Any()).Return(mockMachineStatusAPI).Times(1)
 	mockMachineStatusAPI.EXPECT().GET(gomock.Any()).Return(
 		response_body.ResbodyGetMachine{
 			SystemID:      "test-system-id",
@@ -7241,7 +7371,7 @@ func TestCanonicalMaasController_MachineRegister_GetSubnetListFailure(t *testing
 		}, nil)
 
 	// Mock getSubnetList failure
-	mockFactory.EXPECT().NewSubnets().Return(mockSubnetAPI)
+	mockFactory.EXPECT().NewSubnets(gomock.Any()).Return(mockSubnetAPI)
 	mockSubnetAPI.EXPECT().GET(gomock.Any()).Return(
 		nil, errors.New("subnet list retrieval failed"))
 
@@ -7253,6 +7383,7 @@ func TestCanonicalMaasController_MachineRegister_GetSubnetListFailure(t *testing
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: mockFactory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -7276,6 +7407,7 @@ func TestCanonicalMaasController_MachineRegister_GetSubnetListFailure(t *testing
 
 // Test case: MachineRegister goroutine - getMachineAccessInfo failure after successful polling
 func TestCanonicalMaasController_MachineRegister_GetMachineAccessInfoFailure(t *testing.T) {
+	t.Setenv("MAAS_RUN_MODE", "worker")
 	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
 	defer cleanup()
 
@@ -7313,13 +7445,13 @@ func TestCanonicalMaasController_MachineRegister_GetMachineAccessInfoFailure(t *
 		}, nil)
 
 	// Mock successful commission
-	factory.EXPECT().NewMachineCommission("test-system-id").Return(mockCommissionAPI)
+	factory.EXPECT().NewMachineCommission("test-system-id", gomock.Any()).Return(mockCommissionAPI)
 	mockCommissionAPI.EXPECT().POST(gomock.Any(), gomock.Any()).Return(
 		response_body.ResbodyCommon{HTTPStatus: 200}, nil)
 
 	// Mock machine status API with sequential behavior using DoAndReturn
 	callCount := 0
-	factory.EXPECT().NewMachineSystemID("test-system-id").Return(mockMachineStatusAPI).Times(2)
+	factory.EXPECT().NewMachineSystemID("test-system-id", gomock.Any()).Return(mockMachineStatusAPI).Times(2)
 	mockMachineStatusAPI.EXPECT().
 		GET(gomock.Any()).
 		DoAndReturn(func(ctx context.Context) (response_body.Resbody, error) {
@@ -7341,7 +7473,7 @@ func TestCanonicalMaasController_MachineRegister_GetMachineAccessInfoFailure(t *
 		}).
 		Times(2)
 
-	factory.EXPECT().NewSubnets().Return(mockSubnetAPI)
+	factory.EXPECT().NewSubnets(gomock.Any()).Return(mockSubnetAPI)
 	mockSubnetAPI.EXPECT().GET(gomock.Any()).Return(
 		response_body.ResbodyGetSubnets{
 			List: []response_body.Subnet{
@@ -7358,6 +7490,7 @@ func TestCanonicalMaasController_MachineRegister_GetMachineAccessInfoFailure(t *
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -7381,6 +7514,7 @@ func TestCanonicalMaasController_MachineRegister_GetMachineAccessInfoFailure(t *
 
 // Test case: MachineRegister goroutine - createSubnetAndIPRange failure
 func TestCanonicalMaasController_MachineRegister_CreateSubnetFailure(t *testing.T) {
+	t.Setenv("MAAS_RUN_MODE", "worker")
 	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
 	defer cleanup()
 
@@ -7420,13 +7554,13 @@ func TestCanonicalMaasController_MachineRegister_CreateSubnetFailure(t *testing.
 		}, nil)
 
 	// Mock successful commission
-	factory.EXPECT().NewMachineCommission("test-system-id").Return(mockCommissionAPI)
+	factory.EXPECT().NewMachineCommission("test-system-id", gomock.Any()).Return(mockCommissionAPI)
 	mockCommissionAPI.EXPECT().POST(gomock.Any(), gomock.Any()).Return(
 		response_body.ResbodyCommon{HTTPStatus: 200}, nil)
 
 	// Mock machine status polling - Allow multiple calls during polling
 	mockMachineStatusAPI := mocks.NewMockBasisMaasAPI(ctrl)
-	factory.EXPECT().NewMachineSystemID("test-system-id").Return(mockMachineStatusAPI).AnyTimes()
+	factory.EXPECT().NewMachineSystemID("test-system-id", gomock.Any()).Return(mockMachineStatusAPI).AnyTimes()
 	mockMachineStatusAPI.EXPECT().GET(gomock.Any()).Return(
 		response_body.ResbodyGetMachine{
 			SystemID:      "test-system-id",
@@ -7435,7 +7569,7 @@ func TestCanonicalMaasController_MachineRegister_CreateSubnetFailure(t *testing.
 		}, nil).AnyTimes()
 
 	// Mock successful getSubnetList (empty list to trigger subnet creation)
-	factory.EXPECT().NewSubnets().Return(mockSubnetAPI)
+	factory.EXPECT().NewSubnets(gomock.Any()).Return(mockSubnetAPI)
 	mockSubnetAPI.EXPECT().GET(gomock.Any()).Return(
 		response_body.ResbodyGetSubnets{
 			List:          []response_body.Subnet{}, // Empty - no existing subnets
@@ -7443,7 +7577,7 @@ func TestCanonicalMaasController_MachineRegister_CreateSubnetFailure(t *testing.
 		}, nil)
 
 	// Mock fabric creation failure
-	factory.EXPECT().NewFabrics().Return(mockFabricAPI)
+	factory.EXPECT().NewFabrics(gomock.Any()).Return(mockFabricAPI)
 	mockFabricAPI.EXPECT().POST(gomock.Any(), gomock.Any()).Return(
 		nil, errors.New("fabric creation failed"))
 
@@ -7455,6 +7589,7 @@ func TestCanonicalMaasController_MachineRegister_CreateSubnetFailure(t *testing.
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -7476,6 +7611,7 @@ func TestCanonicalMaasController_MachineRegister_CreateSubnetFailure(t *testing.
 
 // Test case: MachineRegister goroutine - getInterfaceList failure
 func TestCanonicalMaasController_MachineRegister_GetInterfaceListFailure(t *testing.T) {
+	t.Setenv("MAAS_RUN_MODE", "worker")
 	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
 	defer cleanup()
 
@@ -7512,13 +7648,13 @@ func TestCanonicalMaasController_MachineRegister_GetInterfaceListFailure(t *test
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewMachineCommission("test-system-id").Return(mockCommissionAPI)
+	factory.EXPECT().NewMachineCommission("test-system-id", gomock.Any()).Return(mockCommissionAPI)
 	mockCommissionAPI.EXPECT().POST(gomock.Any(), gomock.Any()).Return(
 		response_body.ResbodyCommon{HTTPStatus: 200}, nil)
 
 	// Mock machine status polling with AnyTimes()
 	mockMachineStatusAPI := mocks.NewMockBasisMaasAPI(ctrl)
-	factory.EXPECT().NewMachineSystemID("test-system-id").Return(mockMachineStatusAPI).AnyTimes()
+	factory.EXPECT().NewMachineSystemID("test-system-id", gomock.Any()).Return(mockMachineStatusAPI).AnyTimes()
 	mockMachineStatusAPI.EXPECT().GET(gomock.Any()).Return(
 		response_body.ResbodyGetMachine{
 			SystemID:      "test-system-id",
@@ -7527,7 +7663,7 @@ func TestCanonicalMaasController_MachineRegister_GetInterfaceListFailure(t *test
 		}, nil).AnyTimes()
 
 	// Mock successful getSubnetList with existing subnet
-	factory.EXPECT().NewSubnets().Return(mockSubnetAPI)
+	factory.EXPECT().NewSubnets(gomock.Any()).Return(mockSubnetAPI)
 	mockSubnetAPI.EXPECT().GET(gomock.Any()).Return(
 		response_body.ResbodyGetSubnets{
 			List: []response_body.Subnet{
@@ -7537,7 +7673,7 @@ func TestCanonicalMaasController_MachineRegister_GetInterfaceListFailure(t *test
 		}, nil)
 
 	// Mock getInterfaceList failure
-	factory.EXPECT().NewInterfaces("test-system-id").Return(mockInterfaceAPI)
+	factory.EXPECT().NewInterfaces("test-system-id", gomock.Any()).Return(mockInterfaceAPI)
 	mockInterfaceAPI.EXPECT().GET(gomock.Any()).Return(
 		nil, errors.New("interface list retrieval failed"))
 
@@ -7549,6 +7685,7 @@ func TestCanonicalMaasController_MachineRegister_GetInterfaceListFailure(t *test
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -7570,6 +7707,7 @@ func TestCanonicalMaasController_MachineRegister_GetInterfaceListFailure(t *test
 
 // Test case: MachineRegister goroutine - linkSubnetInterface failure
 func TestCanonicalMaasController_MachineRegister_LinkSubnetInterfaceFailure(t *testing.T) {
+	t.Setenv("MAAS_RUN_MODE", "worker")
 	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
 	defer cleanup()
 
@@ -7607,13 +7745,13 @@ func TestCanonicalMaasController_MachineRegister_LinkSubnetInterfaceFailure(t *t
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewMachineCommission("test-system-id").Return(mockCommissionAPI)
+	factory.EXPECT().NewMachineCommission("test-system-id", gomock.Any()).Return(mockCommissionAPI)
 	mockCommissionAPI.EXPECT().POST(gomock.Any(), gomock.Any()).Return(
 		response_body.ResbodyCommon{HTTPStatus: 200}, nil)
 
 	// Mock machine status polling with AnyTimes()
 	mockMachineStatusAPI := mocks.NewMockBasisMaasAPI(ctrl)
-	factory.EXPECT().NewMachineSystemID("test-system-id").Return(mockMachineStatusAPI).AnyTimes()
+	factory.EXPECT().NewMachineSystemID("test-system-id", gomock.Any()).Return(mockMachineStatusAPI).AnyTimes()
 	mockMachineStatusAPI.EXPECT().GET(gomock.Any()).Return(
 		response_body.ResbodyGetMachine{
 			SystemID:      "test-system-id",
@@ -7622,7 +7760,7 @@ func TestCanonicalMaasController_MachineRegister_LinkSubnetInterfaceFailure(t *t
 		}, nil).AnyTimes()
 
 	// Mock successful getSubnetList
-	factory.EXPECT().NewSubnets().Return(mockSubnetAPI)
+	factory.EXPECT().NewSubnets(gomock.Any()).Return(mockSubnetAPI)
 	mockSubnetAPI.EXPECT().GET(gomock.Any()).Return(
 		response_body.ResbodyGetSubnets{
 			List: []response_body.Subnet{
@@ -7632,7 +7770,7 @@ func TestCanonicalMaasController_MachineRegister_LinkSubnetInterfaceFailure(t *t
 		}, nil)
 
 	// Mock successful getInterfaceList
-	factory.EXPECT().NewInterfaces("test-system-id").Return(mockInterfaceAPI)
+	factory.EXPECT().NewInterfaces("test-system-id", gomock.Any()).Return(mockInterfaceAPI)
 	mockInterfaceAPI.EXPECT().GET(gomock.Any()).Return(
 		response_body.ResbodyGetInterfaces{
 			List: []response_body.Interface{
@@ -7646,7 +7784,7 @@ func TestCanonicalMaasController_MachineRegister_LinkSubnetInterfaceFailure(t *t
 		}, nil)
 
 	// Mock interface disconnect failure
-	factory.EXPECT().NewInterfaceDisconnect("test-system-id", 1).Return(mockDisconnectAPI)
+	factory.EXPECT().NewInterfaceDisconnect("test-system-id", 1, gomock.Any()).Return(mockDisconnectAPI)
 	mockDisconnectAPI.EXPECT().POST(gomock.Any(), gomock.Any()).Return(
 		nil, errors.New("interface disconnect failed"))
 
@@ -7658,6 +7796,7 @@ func TestCanonicalMaasController_MachineRegister_LinkSubnetInterfaceFailure(t *t
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -7699,6 +7838,7 @@ func TestCanonicalMaasController_PowerON(t *testing.T) {
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	request := &proto.PowerOnRequest{
@@ -7733,6 +7873,7 @@ func TestCanonicalMaasController_PowerON_APIError(t *testing.T) {
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	request := &proto.PowerOnRequest{
@@ -7764,6 +7905,7 @@ func TestCanonicalMaasController_PowerOFF(t *testing.T) {
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	request := &proto.PowerOffRequest{
@@ -7795,6 +7937,7 @@ func TestCanonicalMaasController_PowerOFF_APIError(t *testing.T) {
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	request := &proto.PowerOffRequest{
@@ -7842,7 +7985,7 @@ func TestCanonicalMaasController_KubeadmReset(t *testing.T) {
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewMachineSystemID("test-system-id").Return(mockMachineAPI)
+	factory.EXPECT().NewMachineSystemID("test-system-id", gomock.Any()).Return(mockMachineAPI)
 
 	// Mock Ansible CmdExecute for kubeadm reset
 	mockAnsible.EXPECT().CmdExecute(gomock.Any(), "192.168.1.100", "kubeadm_reset.yaml", "").Return([]byte("success"), nil)
@@ -7851,6 +7994,7 @@ func TestCanonicalMaasController_KubeadmReset(t *testing.T) {
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
 		Ansible:    mockAnsible,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	request := &proto.KubeadmResetRequest{
@@ -7879,11 +8023,12 @@ func TestCanonicalMaasController_KubeadmReset_MachineShowError(t *testing.T) {
 	mockMachineAPI.EXPECT().GET(gomock.Any()).Return(
 		response_body.ResbodyCommon{HTTPStatus: 500}, errors.New("machine not found"))
 
-	factory.EXPECT().NewMachineSystemID("test-system-id").Return(mockMachineAPI)
+	factory.EXPECT().NewMachineSystemID("test-system-id", gomock.Any()).Return(mockMachineAPI)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	request := &proto.KubeadmResetRequest{
@@ -7931,7 +8076,7 @@ func TestCanonicalMaasController_KubeadmReset_AnsibleError(t *testing.T) {
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewMachineSystemID("test-system-id").Return(mockMachineAPI)
+	factory.EXPECT().NewMachineSystemID("test-system-id", gomock.Any()).Return(mockMachineAPI)
 
 	// Mock Ansible CmdExecute to fail
 	mockAnsible.EXPECT().CmdExecute(gomock.Any(), "192.168.1.100", "kubeadm_reset.yaml", "").Return(nil, errors.New("ansible execution failed"))
@@ -7940,6 +8085,7 @@ func TestCanonicalMaasController_KubeadmReset_AnsibleError(t *testing.T) {
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
 		Ansible:    mockAnsible,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	request := &proto.KubeadmResetRequest{
@@ -7958,6 +8104,10 @@ func TestCanonicalMaasController_KubeadmReset_AnsibleError(t *testing.T) {
 
 // TestCanonicalMaasController_KubeadmJoin tests KubeadmJoin API (async execution)
 func TestCanonicalMaasController_KubeadmJoin(t *testing.T) {
+	t.Setenv("MAAS_RUN_MODE", "worker")
+	if !localhostSSHAvailable() {
+		t.Skip("SSH (port 22) not available on localhost; skipping")
+	}
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -7971,13 +8121,13 @@ func TestCanonicalMaasController_KubeadmJoin(t *testing.T) {
 		response_body.ResbodyGetMachine{
 			SystemID:    "worker-id",
 			HostName:    "worker-host",
-			IPAddresses: []string{"192.168.1.200"},
+			IPAddresses: []string{"127.0.0.1"},
 			BootInterface: response_body.Interface{
 				Name:       "eth0",
 				MacAddress: "00:11:22:33:44:66",
 				Links: []response_body.Link{
 					{
-						IPAddress: "192.168.1.200",
+						IPAddress: "127.0.0.1",
 						Subnet: response_body.Subnet{
 							ID:   1,
 							Cidr: "192.168.1.0/24",
@@ -8010,22 +8160,24 @@ func TestCanonicalMaasController_KubeadmJoin(t *testing.T) {
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewMachineSystemID("worker-id").Return(mockWorkerAPI)
-	factory.EXPECT().NewMachineSystemID("cp-id-1").Return(mockCPAPI)
+	factory.EXPECT().NewMachineSystemID("worker-id", gomock.Any()).Return(mockWorkerAPI)
+	factory.EXPECT().NewMachineSystemID("cp-id-1", gomock.Any()).Return(mockCPAPI)
 
 	// Mock Ansible CmdExecute: first for control plane token creation, then for worker join
-	mockAnsible.EXPECT().CmdExecute(gomock.Any(), "192.168.1.100", "kubeadm_token_create.yaml", "").Return([]byte("KUBEADM_JOIN_COMMAND=kubeadm join 192.168.1.100:6443 --token abc123 --discovery-token-ca-cert-hash sha256:xyz789"), nil)
-	mockAnsible.EXPECT().CmdExecute(gomock.Any(), "192.168.1.200", "kubeadm_join.yaml", gomock.Any()).Return([]byte("success"), nil)
+	mockAnsible.EXPECT().CmdExecute(gomock.Any(), "192.168.1.100", "kubeadm_token_create.yaml", "", 5).Return([]byte("KUBEADM_JOIN_COMMAND=kubeadm join 192.168.1.100:6443 --token abc123 --discovery-token-ca-cert-hash sha256:xyz789"), nil)
+	mockAnsible.EXPECT().CmdExecute(gomock.Any(), "127.0.0.1", "kubeadm_join.yaml", gomock.Any(), 5).Return([]byte("success"), nil)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
 		Ansible:    mockAnsible,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	request := &proto.KubeadmJoinRequest{
 		SystemId:   "worker-id",
 		CpSystemId: []string{"cp-id-1"},
+		NodeIp:     "10.0.0.1",
 	}
 
 	response, err := controller.KubeadmJoin(context.Background(), request)
@@ -8053,16 +8205,18 @@ func TestCanonicalMaasController_KubeadmJoin_MachineShowError(t *testing.T) {
 	mockMachineAPI.EXPECT().GET(gomock.Any()).Return(
 		response_body.ResbodyCommon{HTTPStatus: 500}, errors.New("machine not found"))
 
-	factory.EXPECT().NewMachineSystemID("worker-id").Return(mockMachineAPI)
+	factory.EXPECT().NewMachineSystemID("worker-id", gomock.Any()).Return(mockMachineAPI)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	request := &proto.KubeadmJoinRequest{
 		SystemId:   "worker-id",
 		CpSystemId: []string{"cp-id-1"},
+		NodeIp:     "10.0.0.1",
 	}
 
 	response, err := controller.KubeadmJoin(context.Background(), request)
@@ -8077,6 +8231,10 @@ func TestCanonicalMaasController_KubeadmJoin_MachineShowError(t *testing.T) {
 
 // TestCanonicalMaasController_KubeadmJoin_TokenCreateError tests KubeadmJoin with token create error
 func TestCanonicalMaasController_KubeadmJoin_TokenCreateError(t *testing.T) {
+	t.Setenv("MAAS_RUN_MODE", "worker")
+	if !localhostSSHAvailable() {
+		t.Skip("SSH (port 22) not available on localhost; skipping")
+	}
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -8091,13 +8249,13 @@ func TestCanonicalMaasController_KubeadmJoin_TokenCreateError(t *testing.T) {
 		response_body.ResbodyGetMachine{
 			SystemID:    "worker-id",
 			HostName:    "worker-host",
-			IPAddresses: []string{"192.168.1.200"},
+			IPAddresses: []string{"127.0.0.1"},
 			BootInterface: response_body.Interface{
 				Name:       "eth0",
 				MacAddress: "00:11:22:33:44:66",
 				Links: []response_body.Link{
 					{
-						IPAddress: "192.168.1.200",
+						IPAddress: "127.0.0.1",
 						Subnet: response_body.Subnet{
 							ID:   1,
 							Cidr: "192.168.1.0/24",
@@ -8130,11 +8288,11 @@ func TestCanonicalMaasController_KubeadmJoin_TokenCreateError(t *testing.T) {
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewMachineSystemID("worker-id").Return(mockWorkerAPI)
-	factory.EXPECT().NewMachineSystemID("cp-id-1").Return(mockCPAPI)
+	factory.EXPECT().NewMachineSystemID("worker-id", gomock.Any()).Return(mockWorkerAPI)
+	factory.EXPECT().NewMachineSystemID("cp-id-1", gomock.Any()).Return(mockCPAPI)
 
 	// Mock Ansible CmdExecute: token creation fails
-	mockAnsible.EXPECT().CmdExecute(gomock.Any(), "192.168.1.100", "kubeadm_token_create.yaml", "").Return(nil, errors.New("token creation failed"))
+	mockAnsible.EXPECT().CmdExecute(gomock.Any(), "192.168.1.100", "kubeadm_token_create.yaml", "", 5).Return(nil, errors.New("token creation failed"))
 
 	// Mock markBroken call
 	factory.EXPECT().NewMachineMarkBroken("worker-id").Return(mockMarkBrokenAPI)
@@ -8145,11 +8303,13 @@ func TestCanonicalMaasController_KubeadmJoin_TokenCreateError(t *testing.T) {
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
 		Ansible:    mockAnsible,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	request := &proto.KubeadmJoinRequest{
 		SystemId:   "worker-id",
 		CpSystemId: []string{"cp-id-1"},
+		NodeIp:     "10.0.0.1",
 	}
 
 	response, err := controller.KubeadmJoin(context.Background(), request)
@@ -8167,6 +8327,10 @@ func TestCanonicalMaasController_KubeadmJoin_TokenCreateError(t *testing.T) {
 
 // TestCanonicalMaasController_KubeadmJoin_ParseError tests KubeadmJoin with join command parse error
 func TestCanonicalMaasController_KubeadmJoin_ParseError(t *testing.T) {
+	t.Setenv("MAAS_RUN_MODE", "worker")
+	if !localhostSSHAvailable() {
+		t.Skip("SSH (port 22) not available on localhost; skipping")
+	}
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -8181,13 +8345,13 @@ func TestCanonicalMaasController_KubeadmJoin_ParseError(t *testing.T) {
 		response_body.ResbodyGetMachine{
 			SystemID:    "worker-id",
 			HostName:    "worker-host",
-			IPAddresses: []string{"192.168.1.200"},
+			IPAddresses: []string{"127.0.0.1"},
 			BootInterface: response_body.Interface{
 				Name:       "eth0",
 				MacAddress: "00:11:22:33:44:66",
 				Links: []response_body.Link{
 					{
-						IPAddress: "192.168.1.200",
+						IPAddress: "127.0.0.1",
 						Subnet: response_body.Subnet{
 							ID:   1,
 							Cidr: "192.168.1.0/24",
@@ -8220,11 +8384,11 @@ func TestCanonicalMaasController_KubeadmJoin_ParseError(t *testing.T) {
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewMachineSystemID("worker-id").Return(mockWorkerAPI)
-	factory.EXPECT().NewMachineSystemID("cp-id-1").Return(mockCPAPI)
+	factory.EXPECT().NewMachineSystemID("worker-id", gomock.Any()).Return(mockWorkerAPI)
+	factory.EXPECT().NewMachineSystemID("cp-id-1", gomock.Any()).Return(mockCPAPI)
 
 	// Mock Ansible CmdExecute: returns output without valid join command
-	mockAnsible.EXPECT().CmdExecute(gomock.Any(), "192.168.1.100", "kubeadm_token_create.yaml", "").Return([]byte("invalid output without join command"), nil)
+	mockAnsible.EXPECT().CmdExecute(gomock.Any(), "192.168.1.100", "kubeadm_token_create.yaml", "", 5).Return([]byte("invalid output without join command"), nil)
 
 	// Mock markBroken call
 	factory.EXPECT().NewMachineMarkBroken("worker-id").Return(mockMarkBrokenAPI)
@@ -8235,11 +8399,13 @@ func TestCanonicalMaasController_KubeadmJoin_ParseError(t *testing.T) {
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
 		Ansible:    mockAnsible,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	request := &proto.KubeadmJoinRequest{
 		SystemId:   "worker-id",
 		CpSystemId: []string{"cp-id-1"},
+		NodeIp:     "10.0.0.1",
 	}
 
 	response, err := controller.KubeadmJoin(context.Background(), request)
@@ -8257,6 +8423,10 @@ func TestCanonicalMaasController_KubeadmJoin_ParseError(t *testing.T) {
 
 // TestCanonicalMaasController_KubeadmJoin_WorkerJoinError tests KubeadmJoin with worker join error
 func TestCanonicalMaasController_KubeadmJoin_WorkerJoinError(t *testing.T) {
+	t.Setenv("MAAS_RUN_MODE", "worker")
+	if !localhostSSHAvailable() {
+		t.Skip("SSH (port 22) not available on localhost; skipping")
+	}
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -8271,13 +8441,13 @@ func TestCanonicalMaasController_KubeadmJoin_WorkerJoinError(t *testing.T) {
 		response_body.ResbodyGetMachine{
 			SystemID:    "worker-id",
 			HostName:    "worker-host",
-			IPAddresses: []string{"192.168.1.200"},
+			IPAddresses: []string{"127.0.0.1"},
 			BootInterface: response_body.Interface{
 				Name:       "eth0",
 				MacAddress: "00:11:22:33:44:66",
 				Links: []response_body.Link{
 					{
-						IPAddress: "192.168.1.200",
+						IPAddress: "127.0.0.1",
 						Subnet: response_body.Subnet{
 							ID:   1,
 							Cidr: "192.168.1.0/24",
@@ -8310,12 +8480,12 @@ func TestCanonicalMaasController_KubeadmJoin_WorkerJoinError(t *testing.T) {
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewMachineSystemID("worker-id").Return(mockWorkerAPI)
-	factory.EXPECT().NewMachineSystemID("cp-id-1").Return(mockCPAPI)
+	factory.EXPECT().NewMachineSystemID("worker-id", gomock.Any()).Return(mockWorkerAPI)
+	factory.EXPECT().NewMachineSystemID("cp-id-1", gomock.Any()).Return(mockCPAPI)
 
 	// Mock Ansible CmdExecute: token creation succeeds, but join fails
-	mockAnsible.EXPECT().CmdExecute(gomock.Any(), "192.168.1.100", "kubeadm_token_create.yaml", "").Return([]byte("KUBEADM_JOIN_COMMAND=kubeadm join 192.168.1.100:6443 --token abc123"), nil)
-	mockAnsible.EXPECT().CmdExecute(gomock.Any(), "192.168.1.200", "kubeadm_join.yaml", gomock.Any()).Return(nil, errors.New("join failed"))
+	mockAnsible.EXPECT().CmdExecute(gomock.Any(), "192.168.1.100", "kubeadm_token_create.yaml", "", 5).Return([]byte("KUBEADM_JOIN_COMMAND=kubeadm join 192.168.1.100:6443 --token abc123"), nil)
+	mockAnsible.EXPECT().CmdExecute(gomock.Any(), "127.0.0.1", "kubeadm_join.yaml", gomock.Any(), 5).Return(nil, errors.New("join failed"))
 
 	// Mock markBroken call
 	factory.EXPECT().NewMachineMarkBroken("worker-id").Return(mockMarkBrokenAPI)
@@ -8326,11 +8496,13 @@ func TestCanonicalMaasController_KubeadmJoin_WorkerJoinError(t *testing.T) {
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
 		Ansible:    mockAnsible,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	request := &proto.KubeadmJoinRequest{
 		SystemId:   "worker-id",
 		CpSystemId: []string{"cp-id-1"},
+		NodeIp:     "10.0.0.1",
 	}
 
 	response, err := controller.KubeadmJoin(context.Background(), request)
@@ -8348,6 +8520,10 @@ func TestCanonicalMaasController_KubeadmJoin_WorkerJoinError(t *testing.T) {
 
 // TestCanonicalMaasController_KubeadmJoin_FallbackParse tests KubeadmJoin with fallback join command parse
 func TestCanonicalMaasController_KubeadmJoin_FallbackParse(t *testing.T) {
+t.Setenv("MAAS_RUN_MODE", "worker")
+if !localhostSSHAvailable() {
+t.Skip("SSH (port 22) not available on localhost; skipping")
+}
 ctrl := gomock.NewController(t)
 defer ctrl.Finish()
 
@@ -8360,11 +8536,11 @@ mockWorkerAPI.EXPECT().GET(gomock.Any()).Return(
 response_body.ResbodyGetMachine{
 SystemID:    "worker-id",
 HostName:    "worker-host",
-IPAddresses: []string{"192.168.1.200"},
+IPAddresses: []string{"127.0.0.1"},
 BootInterface: response_body.Interface{
 Name:       "eth0",
 MacAddress: "00:11:22:33:44:66",
-Links:      []response_body.Link{{IPAddress: "192.168.1.200", Subnet: response_body.Subnet{ID: 1, Cidr: "192.168.1.0/24"}}},
+Links:      []response_body.Link{{IPAddress: "127.0.0.1", Subnet: response_body.Subnet{ID: 1, Cidr: "192.168.1.0/24"}}},
 },
 ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 }, nil)
@@ -8382,15 +8558,15 @@ Links:      []response_body.Link{{IPAddress: "192.168.1.100", Subnet: response_b
 ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 }, nil)
 
-factory.EXPECT().NewMachineSystemID("worker-id").Return(mockWorkerAPI)
-factory.EXPECT().NewMachineSystemID("cp-id-1").Return(mockCPAPI)
+factory.EXPECT().NewMachineSystemID("worker-id", gomock.Any()).Return(mockWorkerAPI)
+factory.EXPECT().NewMachineSystemID("cp-id-1", gomock.Any()).Return(mockCPAPI)
 
 // Fallback parse: direct kubeadm join command without KUBEADM_JOIN_COMMAND marker
-mockAnsible.EXPECT().CmdExecute(gomock.Any(), "192.168.1.100", "kubeadm_token_create.yaml", "").Return([]byte("kubeadm join 192.168.1.100:6443 --token abc123"), nil)
-mockAnsible.EXPECT().CmdExecute(gomock.Any(), "192.168.1.200", "kubeadm_join.yaml", gomock.Any()).Return([]byte("success"), nil)
+mockAnsible.EXPECT().CmdExecute(gomock.Any(), "192.168.1.100", "kubeadm_token_create.yaml", "", 5).Return([]byte("kubeadm join 192.168.1.100:6443 --token abc123"), nil)
+mockAnsible.EXPECT().CmdExecute(gomock.Any(), "127.0.0.1", "kubeadm_join.yaml", gomock.Any(), 5).Return([]byte("success"), nil)
 
-controller := CanonicalMaasController{Logger: klog.NewKlogr(), APIFactory: factory, Ansible: mockAnsible}
-response, err := controller.KubeadmJoin(context.Background(), &proto.KubeadmJoinRequest{SystemId: "worker-id", CpSystemId: []string{"cp-id-1"}})
+controller := CanonicalMaasController{Logger: klog.NewKlogr(), APIFactory: factory, Ansible: mockAnsible, JobManager: async_job.NewInMemoryJobManager()}
+response, err := controller.KubeadmJoin(context.Background(), &proto.KubeadmJoinRequest{SystemId: "worker-id", CpSystemId: []string{"cp-id-1"}, NodeIp: "10.0.0.1"})
 
 if err != nil {
 t.Errorf("Expected no error, got: %v", err)
@@ -8403,6 +8579,10 @@ time.Sleep(50 * time.Millisecond)
 
 // TestCanonicalMaasController_KubeadmJoin_CPMachineShowError tests CP MachineShow error with fallback to next CP
 func TestCanonicalMaasController_KubeadmJoin_CPMachineShowError(t *testing.T) {
+t.Setenv("MAAS_RUN_MODE", "worker")
+if !localhostSSHAvailable() {
+t.Skip("SSH (port 22) not available on localhost; skipping")
+}
 ctrl := gomock.NewController(t)
 defer ctrl.Finish()
 
@@ -8416,11 +8596,11 @@ mockWorkerAPI.EXPECT().GET(gomock.Any()).Return(
 response_body.ResbodyGetMachine{
 SystemID:    "worker-id",
 HostName:    "worker-host",
-IPAddresses: []string{"192.168.1.200"},
+IPAddresses: []string{"127.0.0.1"},
 BootInterface: response_body.Interface{
 Name:       "eth0",
 MacAddress: "00:11:22:33:44:66",
-Links:      []response_body.Link{{IPAddress: "192.168.1.200", Subnet: response_body.Subnet{ID: 1, Cidr: "192.168.1.0/24"}}},
+Links:      []response_body.Link{{IPAddress: "127.0.0.1", Subnet: response_body.Subnet{ID: 1, Cidr: "192.168.1.0/24"}}},
 },
 ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 }, nil)
@@ -8439,15 +8619,15 @@ Links:      []response_body.Link{{IPAddress: "192.168.1.101", Subnet: response_b
 ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 }, nil)
 
-factory.EXPECT().NewMachineSystemID("worker-id").Return(mockWorkerAPI)
-factory.EXPECT().NewMachineSystemID("cp-id-1").Return(mockCPAPI1)
-factory.EXPECT().NewMachineSystemID("cp-id-2").Return(mockCPAPI2)
+factory.EXPECT().NewMachineSystemID("worker-id", gomock.Any()).Return(mockWorkerAPI)
+factory.EXPECT().NewMachineSystemID("cp-id-1", gomock.Any()).Return(mockCPAPI1)
+factory.EXPECT().NewMachineSystemID("cp-id-2", gomock.Any()).Return(mockCPAPI2)
 
-mockAnsible.EXPECT().CmdExecute(gomock.Any(), "192.168.1.101", "kubeadm_token_create.yaml", "").Return([]byte("KUBEADM_JOIN_COMMAND=kubeadm join 192.168.1.101:6443 --token abc123"), nil)
-mockAnsible.EXPECT().CmdExecute(gomock.Any(), "192.168.1.200", "kubeadm_join.yaml", gomock.Any()).Return([]byte("success"), nil)
+mockAnsible.EXPECT().CmdExecute(gomock.Any(), "192.168.1.101", "kubeadm_token_create.yaml", "", 5).Return([]byte("KUBEADM_JOIN_COMMAND=kubeadm join 192.168.1.101:6443 --token abc123"), nil)
+mockAnsible.EXPECT().CmdExecute(gomock.Any(), "127.0.0.1", "kubeadm_join.yaml", gomock.Any(), 5).Return([]byte("success"), nil)
 
-controller := CanonicalMaasController{Logger: klog.NewKlogr(), APIFactory: factory, Ansible: mockAnsible}
-response, err := controller.KubeadmJoin(context.Background(), &proto.KubeadmJoinRequest{SystemId: "worker-id", CpSystemId: []string{"cp-id-1", "cp-id-2"}})
+controller := CanonicalMaasController{Logger: klog.NewKlogr(), APIFactory: factory, Ansible: mockAnsible, JobManager: async_job.NewInMemoryJobManager()}
+response, err := controller.KubeadmJoin(context.Background(), &proto.KubeadmJoinRequest{SystemId: "worker-id", CpSystemId: []string{"cp-id-1", "cp-id-2"}, NodeIp: "10.0.0.1"})
 
 if err != nil {
 t.Errorf("Expected no error, got: %v", err)
@@ -8510,7 +8690,7 @@ func TestCanonicalMaasController_NetworkUpdate_Success(t *testing.T) {
 		BootInterface: response_body.Interface{
 			ID:         1,
 			Name:       "eth0",
-			MacAddress: "00:11:22:33:44:55",
+			MacAddress: "FF:EE:DD:CC:BB:AA", // different from request MAC to avoid boot-interface skip
 			Links: []response_body.Link{
 				{IPAddress: "192.168.30.10", Subnet: response_body.Subnet{ID: 10, Cidr: "192.168.30.0/24"}},
 			},
@@ -8540,6 +8720,7 @@ func TestCanonicalMaasController_NetworkUpdate_Success(t *testing.T) {
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
 		Ansible:    mockAnsible,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	req := &proto.NetworkUpdateRequest{
@@ -8581,6 +8762,7 @@ func TestCanonicalMaasController_NetworkUpdate_GetInterfaceListFailure(t *testin
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
 		Ansible:    mockAnsible,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	req := &proto.NetworkUpdateRequest{
@@ -8628,6 +8810,7 @@ func TestCanonicalMaasController_NetworkUpdate_GetSubnetListFailure(t *testing.T
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
 		Ansible:    mockAnsible,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	req := &proto.NetworkUpdateRequest{
@@ -8681,6 +8864,7 @@ func TestCanonicalMaasController_NetworkUpdate_GetMachineAccessInfoFailure(t *te
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
 		Ansible:    mockAnsible,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	req := &proto.NetworkUpdateRequest{
@@ -8740,6 +8924,7 @@ func TestCanonicalMaasController_NetworkUpdate_InterfaceNotFound(t *testing.T) {
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
 		Ansible:    mockAnsible,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	req := &proto.NetworkUpdateRequest{
@@ -8797,6 +8982,7 @@ func TestCanonicalMaasController_NetworkUpdate_SubnetNotFound(t *testing.T) {
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
 		Ansible:    mockAnsible,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	req := &proto.NetworkUpdateRequest{
@@ -8866,6 +9052,7 @@ func TestCanonicalMaasController_NetworkUpdate_UnreservedIPRangesFailure(t *test
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
 		Ansible:    mockAnsible,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	req := &proto.NetworkUpdateRequest{
@@ -8938,6 +9125,7 @@ func TestCanonicalMaasController_NetworkUpdate_NoUnreservedIPRanges(t *testing.T
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
 		Ansible:    mockAnsible,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	req := &proto.NetworkUpdateRequest{
@@ -9015,6 +9203,7 @@ func TestCanonicalMaasController_NetworkUpdate_IPAddressReserveFailure(t *testin
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
 		Ansible:    mockAnsible,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	req := &proto.NetworkUpdateRequest{
@@ -9084,6 +9273,7 @@ func TestCanonicalMaasController_NetworkUpdate_InvalidCIDRFormat(t *testing.T) {
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
 		Ansible:    mockAnsible,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	req := &proto.NetworkUpdateRequest{
@@ -9166,6 +9356,7 @@ func TestCanonicalMaasController_NetworkUpdate_AnsibleFailure(t *testing.T) {
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
 		Ansible:    mockAnsible,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	req := &proto.NetworkUpdateRequest{
@@ -9251,6 +9442,7 @@ func TestCanonicalMaasController_NetworkUpdate_IPReleaseFailure(t *testing.T) {
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
 		Ansible:    mockAnsible,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	req := &proto.NetworkUpdateRequest{
@@ -9340,6 +9532,7 @@ func TestCanonicalMaasController_NetworkUpdate_SameIPNoRelease(t *testing.T) {
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
 		Ansible:    mockAnsible,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	req := &proto.NetworkUpdateRequest{
@@ -9460,6 +9653,7 @@ func TestCanonicalMaasController_NetworkUpdate_MultipleNetworkInterfaces(t *test
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
 		Ansible:    mockAnsible,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	req := &proto.NetworkUpdateRequest{
@@ -9536,6 +9730,7 @@ func TestCanonicalMaasController_NetworkUpdate_TypeCastFailure(t *testing.T) {
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
 		Ansible:    mockAnsible,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	req := &proto.NetworkUpdateRequest{
@@ -9611,7 +9806,7 @@ func TestCanonicalMaasController_NetworkUpdate_WithUserData_Success(t *testing.T
 		BootInterface: response_body.Interface{
 			ID:         1,
 			Name:       "eth0",
-			MacAddress: "00:11:22:33:44:55",
+			MacAddress: "FF:EE:DD:CC:BB:AA", // different from request MAC to avoid boot-interface skip
 			Links: []response_body.Link{
 				{IPAddress: "192.168.30.10", Subnet: response_body.Subnet{ID: 10, Cidr: "192.168.30.0/24"}},
 			},
@@ -9717,7 +9912,7 @@ func TestCanonicalMaasController_NetworkUpdate_WithUserData_CloudInitFailure(t *
 		BootInterface: response_body.Interface{
 			ID:         1,
 			Name:       "eth0",
-			MacAddress: "00:11:22:33:44:55",
+			MacAddress: "FF:EE:DD:CC:BB:AA", // different from request MAC to avoid boot-interface skip
 			Links: []response_body.Link{
 				{IPAddress: "192.168.30.10", Subnet: response_body.Subnet{ID: 10, Cidr: "192.168.30.0/24"}},
 			},
@@ -9837,6 +10032,7 @@ mockAPI.EXPECT().POST(gomock.Any(), gomock.Any()).DoAndReturn(
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
 		Ansible:    &mockMaasAnsible{},
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 	ctx := context.Background()
 	req := &proto.OsReleaseRequest{SystemId: "test-sys"}
@@ -9873,6 +10069,7 @@ func TestCanonicalMaasController_MachineRegister_DuplicateSubnetID_NoDuplication
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: mockFactory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
@@ -9961,18 +10158,19 @@ func TestCanonicalMaasController_getMachineAccessInfo_BootInterfaceWithChildren(
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		},
 	}
-	factory.EXPECT().NewMachineSystemID("test-system-id").Return(mockMachineAPI).Times(1)
+	factory.EXPECT().NewMachineSystemID("test-system-id", gomock.Any()).Return(mockMachineAPI).Times(1)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
 	systemID := "test-system-id"
 
 	// Act
-	hostName, bootIf, accessAddress, bootMacAddress, subnetIDs, _, _, _, err := controller.getMachineAccessInfo(ctx, systemID)
+	hostName, bootIf, accessAddress, bootMacAddress, subnetIDs, _, _, _, err := controller.getMachineAccessInfo(ctx, systemID, false)
 
 	// Assert
 	if err != nil {
@@ -10054,18 +10252,19 @@ func TestCanonicalMaasController_getMachineAccessInfo_BootInterfaceWithChildren_
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		},
 	}
-	factory.EXPECT().NewMachineSystemID("test-system-id").Return(mockMachineAPI).Times(1)
+	factory.EXPECT().NewMachineSystemID("test-system-id", gomock.Any()).Return(mockMachineAPI).Times(1)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
 	systemID := "test-system-id"
 
 	// Act
-	hostName, bootIf, accessAddress, bootMacAddress, subnetIDs, _, _, _, err := controller.getMachineAccessInfo(ctx, systemID)
+	hostName, bootIf, accessAddress, bootMacAddress, subnetIDs, _, _, _, err := controller.getMachineAccessInfo(ctx, systemID, false)
 
 	// Assert
 	if err != nil {
@@ -10143,18 +10342,19 @@ func TestCanonicalMaasController_getMachineAccessInfo_BootInterfaceWithChildren_
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		},
 	}
-	factory.EXPECT().NewMachineSystemID("test-system-id").Return(mockMachineAPI).Times(1)
+	factory.EXPECT().NewMachineSystemID("test-system-id", gomock.Any()).Return(mockMachineAPI).Times(1)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	ctx := context.Background()
 	systemID := "test-system-id"
 
 	// Act
-	hostName, bootIf, accessAddress, bootMacAddress, subnetIDs, _, _, _, err := controller.getMachineAccessInfo(ctx, systemID)
+	hostName, bootIf, accessAddress, bootMacAddress, subnetIDs, _, _, _, err := controller.getMachineAccessInfo(ctx, systemID, false)
 
 	// Assert
 	if err != nil {
@@ -10237,6 +10437,36 @@ func TestCanonicalMaasController_isCloudInitDone(t *testing.T) {
 			output: []byte("  CLOUD_INIT_STATUS=done  "),
 			want:   true,
 		},
+		{
+			name:   "CloudDoneAndUserApplyDone_ReturnsTrue",
+			output: []byte("CLOUD_INIT_STATUS=done\nUSER_DATA_APPLY_STATUS=done"),
+			want:   true,
+		},
+		{
+			name:   "CloudDoneAndUserApplyRunning_ReturnsFalse",
+			output: []byte("CLOUD_INIT_STATUS=done\nUSER_DATA_APPLY_STATUS=running"),
+			want:   false,
+		},
+		{
+			name:   "CloudDoneAndUserApplyQueued_ReturnsFalse",
+			output: []byte("CLOUD_INIT_STATUS=done\nUSER_DATA_APPLY_STATUS=queued"),
+			want:   false,
+		},
+		{
+			name:   "CloudDoneAndUserApplyFailed_ReturnsFalse",
+			output: []byte("CLOUD_INIT_STATUS=done\nUSER_DATA_APPLY_STATUS=failed"),
+			want:   false,
+		},
+		{
+			name:   "CloudDoneAndUserApplyUnknown_ReturnsTrue",
+			output: []byte("CLOUD_INIT_STATUS=done\nUSER_DATA_APPLY_STATUS=unknown"),
+			want:   true,
+		},
+		{
+			name:   "CloudRunningAndUserApplyUnknown_ReturnsFalse",
+			output: []byte("CLOUD_INIT_STATUS=running\nUSER_DATA_APPLY_STATUS=unknown"),
+			want:   false,
+		},
 	}
 
 	for _, tc := range tests {
@@ -10247,6 +10477,7 @@ func TestCanonicalMaasController_isCloudInitDone(t *testing.T) {
 			controller := CanonicalMaasController{
 				Logger:  klog.NewKlogr(),
 				Ansible: &mockMaasAnsible{cmdExecuteOutput: tc.output, cmdExecuteErr: tc.err},
+				JobManager: async_job.NewInMemoryJobManager(),
 			}
 			got := controller.isCloudInitDone(context.Background(), "192.168.1.1")
 			if got != tc.want {
@@ -10264,7 +10495,7 @@ func TestCanonicalMaasController_isSSHReachable_CancelledContext_ReturnsFalse(t 
 	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
 	defer cleanup()
 
-	controller := CanonicalMaasController{Logger: klog.NewKlogr()}
+	controller := CanonicalMaasController{Logger: klog.NewKlogr(), JobManager: async_job.NewInMemoryJobManager()}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // pre-cancel so DialContext fails immediately
 	result := controller.isSSHReachable(ctx, "127.0.0.1", 5*time.Second)
@@ -10280,10 +10511,84 @@ func TestCanonicalMaasController_isSSHReachable_LocalhostListening_ReturnsTrue(t
 	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
 	defer cleanup()
 
-	controller := CanonicalMaasController{Logger: klog.NewKlogr()}
+	controller := CanonicalMaasController{Logger: klog.NewKlogr(), JobManager: async_job.NewInMemoryJobManager()}
 	result := controller.isSSHReachable(context.Background(), "127.0.0.1", 5*time.Second)
 	if !result {
 		t.Errorf("Expected true for localhost SSH, got false")
+	}
+}
+
+func TestCanonicalMaasController_isSSHReachableConsecutive_CancelledContext_ReturnsFalse(t *testing.T) {
+	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
+	defer cleanup()
+
+	controller := CanonicalMaasController{Logger: klog.NewKlogr(), JobManager: async_job.NewInMemoryJobManager()}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result := controller.isSSHReachableConsecutive(ctx, "127.0.0.1", 0, 10*time.Millisecond)
+	if result {
+		t.Errorf("Expected false for cancelled context, got true")
+	}
+}
+
+func TestCanonicalMaasController_isSSHReachableConsecutive_LocalhostListening_ReturnsTrue(t *testing.T) {
+	if !localhostSSHAvailable() {
+		t.Skip("SSH (port 22) not available on localhost; skipping")
+	}
+	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
+	defer cleanup()
+
+	controller := CanonicalMaasController{Logger: klog.NewKlogr(), JobManager: async_job.NewInMemoryJobManager()}
+	result := controller.isSSHReachableConsecutive(context.Background(), "127.0.0.1", 3, 10*time.Millisecond)
+	if !result {
+		t.Errorf("Expected true for localhost SSH consecutive checks, got false")
+	}
+}
+
+func TestCanonicalMaasController_KubeadmJoin_PrecheckFailure_ReturnsError(t *testing.T) {
+	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
+	defer cleanup()
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	factory := mocks.NewMockMaasAPIFactory(ctrl)
+	mockWorkerAPI := mocks.NewMockBasisMaasAPI(ctrl)
+
+	mockWorkerAPI.EXPECT().GET(gomock.Any()).Return(
+		response_body.ResbodyGetMachine{
+			SystemID:    "worker-id",
+			HostName:    "worker-host",
+			IPAddresses: []string{"127.0.0.1"},
+			BootInterface: response_body.Interface{
+				Name:       "eth0",
+				MacAddress: "00:11:22:33:44:66",
+				Links: []response_body.Link{{
+					IPAddress: "127.0.0.1",
+					Subnet:    response_body.Subnet{ID: 1, Cidr: "192.168.1.0/24"},
+				}},
+			},
+			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
+		}, nil)
+
+	factory.EXPECT().NewMachineSystemID("worker-id").Return(mockWorkerAPI)
+
+	controller := CanonicalMaasController{
+		Logger:     klog.NewKlogr(),
+		APIFactory: factory,
+		JobManager: async_job.NewInMemoryJobManager(),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	response, err := controller.KubeadmJoin(ctx, &proto.KubeadmJoinRequest{SystemId: "worker-id", CpSystemId: []string{"cp-id-1"}, NodeIp: "10.0.0.1"})
+
+	if err == nil {
+		t.Fatal("Expected error, got nil")
+	}
+	if response.GetResult() != common.ResultCode_ERROR {
+		t.Errorf("Expected result ERROR, got %v", response.GetResult())
 	}
 }
 
@@ -10313,9 +10618,9 @@ func TestCanonicalMaasController_getReadyStatus(t *testing.T) {
 
 	sshAvailable := localhostSSHAvailable()
 
-	jobManagerWithJob := NewInMemoryJobManager()
-	jobManagerWithJob.Register("sys-job", JobTypeMachineRegister)
-	jobManagerEmpty := NewInMemoryJobManager()
+	jobManagerWithJob := async_job.NewInMemoryJobManager()
+	jobManagerWithJob.Register("sys-job", async_job.JobTypeMachineRegister)
+	jobManagerEmpty := async_job.NewInMemoryJobManager()
 
 	ansibleDone := &mockMaasAnsible{cmdExecuteOutput: []byte("CLOUD_INIT_STATUS=done")}
 	ansibleRunning := &mockMaasAnsible{cmdExecuteOutput: []byte("CLOUD_INIT_STATUS=running")}
@@ -10331,7 +10636,7 @@ func TestCanonicalMaasController_getReadyStatus(t *testing.T) {
 		powerStatus   string
 		accessAddress string
 		ansible       *mockMaasAnsible
-		jobManager    *JobManager
+		jobManager    *async_job.JobManager
 		ctx           context.Context
 		skipIfNoSSH   bool
 		want          string
@@ -10485,12 +10790,53 @@ func TestCanonicalMaasController_getReadyStatus(t *testing.T) {
 	}
 }
 
+func TestCanonicalMaasController_isWorkerMode_Enabled(t *testing.T) {
+    os.Setenv("MAAS_RUN_MODE", "worker")
+    defer os.Unsetenv("MAAS_RUN_MODE")
+    if !isWorkerMode() {
+        t.Error("Expected true")
+    }
+}
+
+func TestCanonicalMaasController_buildAsyncRequestID(t *testing.T) {
+    id := buildAsyncRequestID(async_job.JobTypeMachineRegister, "sys-1", "")
+    if id == "" || len(id) != 12 {
+        t.Error("Invalid request ID")
+    }
+}
+
+func TestCanonicalMaasController_normalizeSubnetIDList(t *testing.T) {
+    result := normalizeSubnetIDList([]int{1, 2, 2, -1, 0})
+    if len(result) != 2 { // 1, 2のみ
+        t.Errorf("Expected 2 items, got %d", len(result))
+    }
+}
+
+func TestCanonicalMaasController_subnetIDSetFromLinks(t *testing.T) {
+    links := []response_body.Link{{Subnet: response_body.Subnet{ID: 1}}}
+    result := subnetIDSetFromLinks(links)
+    if len(result) != 1 {
+        t.Error("Expected 1 subnet ID")
+    }
+}
+
+func TestCanonicalMaasController_sameSubnetIDSet(t *testing.T) {
+    if !sameSubnetIDSet([]int{1, 2}, []int{2, 1}) {
+        t.Error("Should match")
+    }
+}
+
 // TestCanonicalMaasController_KubeadmJoin_AnsibleFormatWithTrailingQuote verifies that
 // Ansible's JSON-wrapped debug output (which appends a trailing `"` after SplitN on the
 // KUBEADM_JOIN_COMMAND= marker) is handled correctly:
 //   - the trailing `"` is stripped via TrimSuffix
 //   - extra-vars passed to kubeadm_join.yaml is valid JSON with the clean command value
 func TestCanonicalMaasController_KubeadmJoin_AnsibleFormatWithTrailingQuote(t *testing.T) {
+	t.Setenv("MAAS_RUN_MODE", "worker")
+	if !localhostSSHAvailable() {
+		t.Skip("SSH (port 22) not available on localhost; skipping")
+	}
+
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -10503,7 +10849,7 @@ func TestCanonicalMaasController_KubeadmJoin_AnsibleFormatWithTrailingQuote(t *t
 		response_body.ResbodyGetMachine{
 			BootInterface: response_body.Interface{
 				Links: []response_body.Link{
-					{IPAddress: "192.168.1.200", Subnet: response_body.Subnet{ID: 1, Cidr: "192.168.1.0/24"}},
+					{IPAddress: "127.0.0.1", Subnet: response_body.Subnet{ID: 1, Cidr: "192.168.1.0/24"}},
 				},
 			},
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
@@ -10519,8 +10865,8 @@ func TestCanonicalMaasController_KubeadmJoin_AnsibleFormatWithTrailingQuote(t *t
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		}, nil)
 
-	factory.EXPECT().NewMachineSystemID("worker-id").Return(mockWorkerAPI)
-	factory.EXPECT().NewMachineSystemID("cp-id-1").Return(mockCPAPI)
+	factory.EXPECT().NewMachineSystemID("worker-id", gomock.Any()).Return(mockWorkerAPI)
+	factory.EXPECT().NewMachineSystemID("cp-id-1", gomock.Any()).Return(mockCPAPI)
 
 	// Realistic Ansible debug output: the `"msg": "KUBEADM_JOIN_COMMAND=..."` line
 	// has a trailing `"` (JSON closing quote) after SplitN on "KUBEADM_JOIN_COMMAND=".
@@ -10531,13 +10877,13 @@ func TestCanonicalMaasController_KubeadmJoin_AnsibleFormatWithTrailingQuote(t *t
 		"    \"msg\": \"KUBEADM_JOIN_COMMAND=" + wantJoinCmd + "\"\n" +
 		"}"
 
-	mockAnsible.EXPECT().CmdExecute(gomock.Any(), "192.168.1.100", "kubeadm_token_create.yaml", "").
+	mockAnsible.EXPECT().CmdExecute(gomock.Any(), "192.168.1.100", "kubeadm_token_create.yaml", "", 5).
 		Return([]byte(ansibleOutput), nil)
 
 	// Capture the extra-vars passed to kubeadm_join.yaml
 	capturedExtra := make(chan string, 1)
-	mockAnsible.EXPECT().CmdExecute(gomock.Any(), "192.168.1.200", "kubeadm_join.yaml", gomock.Any()).
-		DoAndReturn(func(_ context.Context, _, _ string, extra string) ([]byte, error) {
+	mockAnsible.EXPECT().CmdExecute(gomock.Any(), "127.0.0.1", "kubeadm_join.yaml", gomock.Any(), 5).
+		DoAndReturn(func(_ context.Context, _, _ string, extra string, _ ...int) ([]byte, error) {
 			capturedExtra <- extra
 			return []byte("success"), nil
 		})
@@ -10546,11 +10892,13 @@ func TestCanonicalMaasController_KubeadmJoin_AnsibleFormatWithTrailingQuote(t *t
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
 		Ansible:    mockAnsible,
+		JobManager: async_job.NewInMemoryJobManager(),
 	}
 
 	_, err := controller.KubeadmJoin(context.Background(), &proto.KubeadmJoinRequest{
 		SystemId:   "worker-id",
 		CpSystemId: []string{"cp-id-1"},
+		NodeIp:     "10.0.0.1",
 	})
 	if err != nil {
 		t.Fatalf("KubeadmJoin returned unexpected error: %v", err)
@@ -10566,6 +10914,10 @@ func TestCanonicalMaasController_KubeadmJoin_AnsibleFormatWithTrailingQuote(t *t
 		// ② the join_command value must not contain a trailing `"`
 		if m["join_command"] != wantJoinCmd {
 			t.Errorf("join_command = %q\nwant        = %q", m["join_command"], wantJoinCmd)
+		}
+		// ③ node_ip must be present
+		if m["node_ip"] != "10.0.0.1" {
+			t.Errorf("node_ip = %q, want %q", m["node_ip"], "10.0.0.1")
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Error("timeout: kubeadm_join.yaml was not called within 500ms")
@@ -10618,7 +10970,7 @@ func TestCanonicalMaasController_NetworkUpdate_MultipleCIDRsSameMAC(t *testing.T
 		IPAddresses: []string{"192.168.30.10"},
 		BootInterface: response_body.Interface{
 			Name:       "eth0",
-			MacAddress: "00:11:22:33:44:55",
+			MacAddress: "FF:EE:DD:CC:BB:AA", // different from request MAC to avoid boot-interface skip
 			Links: []response_body.Link{
 				{IPAddress: "192.168.30.10", Subnet: response_body.Subnet{ID: 10, Cidr: "192.168.30.0/24"}},
 			},
@@ -10656,7 +11008,7 @@ func TestCanonicalMaasController_NetworkUpdate_MultipleCIDRsSameMAC(t *testing.T
 	capturedExtra := make(chan string, 1)
 	mockAnsible.EXPECT().
 		CmdExecute(gomock.Any(), gomock.Any(), "set_static_ip.yaml", gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ string, _ string, extra string) ([]byte, error) {
+		DoAndReturn(func(_ context.Context, _ string, _ string, extra string, _ ...int) ([]byte, error) {
 			capturedExtra <- extra
 			return []byte("success"), nil
 		}).Times(1)
@@ -10759,7 +11111,7 @@ func TestCanonicalMaasController_NetworkUpdate_WithExistingIPTags_OldIPReleased(
 		IPAddresses: []string{"192.168.30.50"},
 		BootInterface: response_body.Interface{
 			Name:       "eth0",
-			MacAddress: "00:11:22:33:44:55",
+			MacAddress: "FF:EE:DD:CC:BB:AA", // different from request MAC to avoid boot-interface skip
 			Links: []response_body.Link{
 				{IPAddress: "192.168.30.50", Subnet: response_body.Subnet{ID: 10, Cidr: "192.168.30.0/24"}},
 			},
@@ -10855,7 +11207,7 @@ func TestCanonicalMaasController_NetworkUpdate_InterfaceRemoveTagFailure(t *test
 		IPAddresses: []string{"192.168.30.50"},
 		BootInterface: response_body.Interface{
 			Name:       "eth0",
-			MacAddress: "00:11:22:33:44:55",
+			MacAddress: "FF:EE:DD:CC:BB:AA", // different from request MAC to avoid boot-interface skip
 			Links: []response_body.Link{
 				{IPAddress: "192.168.30.50", Subnet: response_body.Subnet{ID: 10, Cidr: "192.168.30.0/24"}},
 			},
@@ -10944,7 +11296,7 @@ func TestCanonicalMaasController_NetworkUpdate_InterfaceAddTagFailure(t *testing
 		IPAddresses: []string{},
 		BootInterface: response_body.Interface{
 			Name:       "eth0",
-			MacAddress: "00:11:22:33:44:55",
+			MacAddress: "FF:EE:DD:CC:BB:AA", // different from request MAC to avoid boot-interface skip
 			Links:      []response_body.Link{},
 		},
 		ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
@@ -10984,6 +11336,269 @@ func TestCanonicalMaasController_NetworkUpdate_InterfaceAddTagFailure(t *testing
 	}
 	if response.GetResult() != common.ResultCode_ERROR {
 		t.Errorf("Expected result ERROR, got %v", response.GetResult())
+	}
+}
+
+// =============================================================
+// NetworkUpdate: boot interface MAC in request → skipped (ACCEPT, no API calls beyond getters)
+// =============================================================
+
+// TestCanonicalMaasController_NetworkUpdate_SkipBootInterfaceMAC verifies that when the
+// only NetworkInformation entry targets the boot interface MAC, it is skipped entirely
+// (no IP reservation, no Ansible call, no MAAS tag update) and the RPC returns ACCEPT.
+func TestCanonicalMaasController_NetworkUpdate_SkipBootInterfaceMAC(t *testing.T) {
+	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
+	defer cleanup()
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockAPI := mocks.NewMockBasisMaasAPI(ctrl)
+	factory := &mockMaasAPIFactory{factory: mockAPI}
+	mockAnsible := &mockMaasAnsible{} // CmdExecute must NOT be called
+
+	// getInterfaceList
+	mockAPI.EXPECT().GET(gomock.Any()).Return(response_body.ResbodyGetInterfaces{
+		List: []response_body.Interface{
+			{
+				ID:         1,
+				Name:       "eth0",
+				MacAddress: "00:11:22:33:44:55",
+				Tags:       []string{},
+				Links: []response_body.Link{
+					{IPAddress: "192.168.10.171", Subnet: response_body.Subnet{ID: 10, Cidr: "192.168.10.0/24"}},
+				},
+			},
+		},
+		ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
+	}, nil)
+
+	// getSubnetList
+	mockAPI.EXPECT().GET(gomock.Any()).Return(response_body.ResbodyGetSubnets{
+		List:          []response_body.Subnet{{ID: 10, Cidr: "192.168.10.0/24"}},
+		ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
+	}, nil)
+
+	// getMachineAccessInfo: BootInterface.MacAddress == request MAC
+	mockAPI.EXPECT().GET(gomock.Any()).Return(response_body.ResbodyGetMachine{
+		SystemID:    "test-system-id",
+		StatusName:  "Deployed",
+		IPAddresses: []string{"192.168.10.171"},
+		BootInterface: response_body.Interface{
+			ID:         1,
+			Name:       "eth0",
+			MacAddress: "00:11:22:33:44:55",
+			Links: []response_body.Link{
+				{IPAddress: "192.168.10.171", Subnet: response_body.Subnet{ID: 10, Cidr: "192.168.10.0/24"}},
+			},
+		},
+		ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
+	}, nil)
+	// No further GET/POST calls expected — boot interface is skipped entirely
+
+	controller := CanonicalMaasController{
+		Logger:     klog.NewKlogr(),
+		APIFactory: factory,
+		Ansible:    mockAnsible,
+	}
+
+	req := &proto.NetworkUpdateRequest{
+		SystemId: "test-system-id",
+		NetworkInformation: []*proto.NetworkInformation{
+			{MacAddress: "00:11:22:33:44:55", Cidr: "192.168.10.0/24"},
+		},
+	}
+
+	response, err := controller.NetworkUpdate(context.Background(), req)
+	if err != nil {
+		t.Errorf("Expected no error, got: %v", err)
+	}
+	if response.GetResult() != common.ResultCode_ACCEPT {
+		t.Errorf("Expected result ACCEPT, got %v", response.GetResult())
+	}
+}
+
+// TestCanonicalMaasController_NetworkUpdate_SkipBootInterfaceMAC_WithOtherInterface verifies
+// that when a request contains both the boot interface MAC and another NIC, the boot interface
+// is skipped while the other NIC is processed normally.
+func TestCanonicalMaasController_NetworkUpdate_SkipBootInterfaceMAC_WithOtherInterface(t *testing.T) {
+	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
+	defer cleanup()
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockAPI := mocks.NewMockBasisMaasAPI(ctrl)
+	factory := &mockMaasAPIFactory{factory: mockAPI}
+	mockAnsible := &mockMaasAnsible{
+		cmdExecuteOutput: []byte("success"),
+		cmdExecuteErr:    nil,
+	}
+
+	// getInterfaceList: boot NIC (eth0) + data NIC (eth1)
+	mockAPI.EXPECT().GET(gomock.Any()).Return(response_body.ResbodyGetInterfaces{
+		List: []response_body.Interface{
+			{
+				ID:         1,
+				Name:       "eth0",
+				MacAddress: "00:11:22:33:44:55",
+				Tags:       []string{},
+				Links: []response_body.Link{
+					{IPAddress: "192.168.10.171", Subnet: response_body.Subnet{ID: 10, Cidr: "192.168.10.0/24"}},
+				},
+			},
+			{
+				ID:         2,
+				Name:       "eth1",
+				MacAddress: "AA:BB:CC:DD:EE:FF",
+				Tags:       []string{},
+				Links:      []response_body.Link{},
+			},
+		},
+		ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
+	}, nil)
+
+	// getSubnetList
+	mockAPI.EXPECT().GET(gomock.Any()).Return(response_body.ResbodyGetSubnets{
+		List: []response_body.Subnet{
+			{ID: 10, Cidr: "192.168.10.0/24"},
+			{ID: 20, Cidr: "10.0.0.0/24"},
+		},
+		ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
+	}, nil)
+
+	// getMachineAccessInfo: BootInterface.MacAddress = eth0 (00:11:22:33:44:55)
+	mockAPI.EXPECT().GET(gomock.Any()).Return(response_body.ResbodyGetMachine{
+		SystemID:    "test-system-id",
+		StatusName:  "Deployed",
+		IPAddresses: []string{"192.168.10.171"},
+		BootInterface: response_body.Interface{
+			ID:         1,
+			Name:       "eth0",
+			MacAddress: "00:11:22:33:44:55",
+			Links: []response_body.Link{
+				{IPAddress: "192.168.10.171", Subnet: response_body.Subnet{ID: 10, Cidr: "192.168.10.0/24"}},
+			},
+		},
+		ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
+	}, nil)
+
+	// Only eth1 (AA:BB:CC:DD:EE:FF) proceeds with IP reservation steps
+	mockAPI.EXPECT().GET(gomock.Any()).Return(response_body.ResbodySubnetUnreservedIPRanges{
+		List: []response_body.UnreservedIPRange{
+			{Start: "10.0.0.100", End: "10.0.0.200", NumAddresses: 101},
+		},
+		ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
+	}, nil)
+
+	// IPAddressReserve for eth1
+	mockAPI.EXPECT().POST(gomock.Any(), gomock.Any()).Return(response_body.ResbodyIPAddressReserve{
+		ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
+	}, nil)
+
+	// InterfaceAddTag for eth1 (no old tags → no release/remove)
+	mockAPI.EXPECT().POST(gomock.Any(), gomock.Any()).Return(response_body.ResbodyCommon{
+		HTTPStatus: 200,
+	}, nil)
+
+	controller := CanonicalMaasController{
+		Logger:     klog.NewKlogr(),
+		APIFactory: factory,
+		Ansible:    mockAnsible,
+	}
+
+	req := &proto.NetworkUpdateRequest{
+		SystemId: "test-system-id",
+		NetworkInformation: []*proto.NetworkInformation{
+			// boot interface first — must be skipped
+			{MacAddress: "00:11:22:33:44:55", Cidr: "192.168.10.0/24"},
+			// data interface — must be processed
+			{MacAddress: "AA:BB:CC:DD:EE:FF", Cidr: "10.0.0.0/24"},
+		},
+	}
+
+	response, err := controller.NetworkUpdate(context.Background(), req)
+	if err != nil {
+		t.Errorf("Expected no error, got: %v", err)
+	}
+	if response.GetResult() != common.ResultCode_ACCEPT {
+		t.Errorf("Expected result ACCEPT, got %v", response.GetResult())
+	}
+}
+
+// TestCanonicalMaasController_NetworkUpdate_SkipBootInterfaceMAC_CaseInsensitive verifies that
+// MAC comparison is case-insensitive (request uses upper-case, MAAS returns lower-case and vice
+// versa).
+func TestCanonicalMaasController_NetworkUpdate_SkipBootInterfaceMAC_CaseInsensitive(t *testing.T) {
+	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
+	defer cleanup()
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockAPI := mocks.NewMockBasisMaasAPI(ctrl)
+	factory := &mockMaasAPIFactory{factory: mockAPI}
+	mockAnsible := &mockMaasAnsible{} // CmdExecute must NOT be called
+
+	// getInterfaceList: MAC in lower-case
+	mockAPI.EXPECT().GET(gomock.Any()).Return(response_body.ResbodyGetInterfaces{
+		List: []response_body.Interface{
+			{
+				ID:         1,
+				Name:       "eth0",
+				MacAddress: "00:11:22:33:44:55", // lower-case
+				Tags:       []string{},
+				Links: []response_body.Link{
+					{IPAddress: "192.168.10.171", Subnet: response_body.Subnet{ID: 10, Cidr: "192.168.10.0/24"}},
+				},
+			},
+		},
+		ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
+	}, nil)
+
+	// getSubnetList
+	mockAPI.EXPECT().GET(gomock.Any()).Return(response_body.ResbodyGetSubnets{
+		List:          []response_body.Subnet{{ID: 10, Cidr: "192.168.10.0/24"}},
+		ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
+	}, nil)
+
+	// getMachineAccessInfo: BootInterface.MacAddress in upper-case
+	mockAPI.EXPECT().GET(gomock.Any()).Return(response_body.ResbodyGetMachine{
+		SystemID:    "test-system-id",
+		StatusName:  "Deployed",
+		IPAddresses: []string{"192.168.10.171"},
+		BootInterface: response_body.Interface{
+			ID:         1,
+			Name:       "eth0",
+			MacAddress: "00:11:22:33:44:55", // same MAC, upper-case variant
+			Links: []response_body.Link{
+				{IPAddress: "192.168.10.171", Subnet: response_body.Subnet{ID: 10, Cidr: "192.168.10.0/24"}},
+			},
+		},
+		ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
+	}, nil)
+	// No further GET/POST calls expected
+
+	controller := CanonicalMaasController{
+		Logger:     klog.NewKlogr(),
+		APIFactory: factory,
+		Ansible:    mockAnsible,
+	}
+
+	req := &proto.NetworkUpdateRequest{
+		SystemId: "test-system-id",
+		NetworkInformation: []*proto.NetworkInformation{
+			// Request uses upper-case MAC — must still be recognised as boot interface and skipped
+			{MacAddress: "00:11:22:33:44:55", Cidr: "192.168.10.0/24"},
+		},
+	}
+
+	response, err := controller.NetworkUpdate(context.Background(), req)
+	if err != nil {
+		t.Errorf("Expected no error, got: %v", err)
+	}
+	if response.GetResult() != common.ResultCode_ACCEPT {
+		t.Errorf("Expected result ACCEPT, got %v", response.GetResult())
 	}
 }
 
@@ -11040,14 +11655,14 @@ func TestCanonicalMaasController_getMachineAccessInfo_SyntheticLinkSubnetIDZeroE
 			ResbodyCommon: response_body.ResbodyCommon{HTTPStatus: 200},
 		},
 	}
-	factory.EXPECT().NewMachineSystemID("test-system-id").Return(mockMachineAPI).Times(1)
+	factory.EXPECT().NewMachineSystemID("test-system-id", gomock.Any()).Return(mockMachineAPI).Times(1)
 
 	controller := CanonicalMaasController{
 		Logger:     klog.NewKlogr(),
 		APIFactory: factory,
 	}
 
-	_, _, _, _, subnetIDs, _, _, _, err := controller.getMachineAccessInfo(context.Background(), "test-system-id")
+	_, _, _, _, subnetIDs, _, _, _, err := controller.getMachineAccessInfo(context.Background(), "test-system-id", false)
 
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)

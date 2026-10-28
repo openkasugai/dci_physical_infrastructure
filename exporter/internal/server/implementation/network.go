@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package implementation
 
 import (
@@ -130,7 +116,7 @@ func (l *NetworkImplement) parseAndWriteMetrics(host string, input interface{}, 
 		// Skip empty lines and header lines
 		if line == "" || strings.HasPrefix(line, "IFACE") || strings.HasPrefix(line, "----------") {
 			if !headerSkipped {
-				l.Logger.V(2).Info("branch: skipping header line", "host", host)
+				l.Logger.V(3).Info("branch: skipping header line", "host", host)
 				headerSkipped = true
 				continue
 			} else {
@@ -142,13 +128,13 @@ func (l *NetworkImplement) parseAndWriteMetrics(host string, input interface{}, 
 
 		// Check if the line has enough fields
 		if len(fields) != 16 {
-			l.Logger.V(2).Info("branch: skipping line with insufficient fields", "host", host, "field_count", len(fields))
+			l.Logger.V(3).Info("branch: skipping line with insufficient fields", "host", host, "field_count", len(fields))
 			continue
 		}
 
 		// Extract data
 		iface := fields[0]
-		l.Logger.V(2).Info("branch: processing interface", "host", host, "interface", iface)
+		l.Logger.V(3).Info("branch: processing interface", "host", host, "interface", iface)
 
 		rxOKValue := fields[2]
 		rxBPSValue := fields[3]
@@ -166,140 +152,140 @@ func (l *NetworkImplement) parseAndWriteMetrics(host string, input interface{}, 
 		// Convert string values to float64
 		rxOKFloat, err := parseFloat(rxOKValue)
 		if err != nil {
-			l.Logger.V(2).Info("branch: rx_ok parsing failed", "host", host, "interface", iface, "error", err.Error())
+			l.Logger.V(3).Info("branch: rx_ok parsing failed", "host", host, "interface", iface, "error", err.Error())
 			l.Logger.Error(err, fixedErrorMsg+"rx_ok for %s: %v", iface, err)
 			continue
 		}
 
 		rxBPSFloat, err := parseFloat(rxBPSValue)
 		if err != nil {
-			l.Logger.V(2).Info("branch: rx_bps parsing failed", "host", host, "interface", iface, "error", err.Error())
+			l.Logger.V(3).Info("branch: rx_bps parsing failed", "host", host, "interface", iface, "error", err.Error())
 			l.Logger.Error(err, fixedErrorMsg+"rx_bps for %s: %v", iface, err)
 			continue
 		}
 
 		rxUtilFloat, err := parsePercentage(rxUtilValue)
 		if err != nil {
-			l.Logger.V(2).Info("branch: rx_util parsing failed", "host", host, "interface", iface, "error", err.Error())
+			l.Logger.V(3).Info("branch: rx_util parsing failed", "host", host, "interface", iface, "error", err.Error())
 			l.Logger.Error(err, fixedErrorMsg+"rx_util for %s: %v", iface, err)
 			continue
 		}
 
 		rxErrFloat, err := parseFloat(rxErrValue)
 		if err != nil {
-			l.Logger.V(2).Info("branch: rx_err parsing failed", "host", host, "interface", iface, "error", err.Error())
+			l.Logger.V(3).Info("branch: rx_err parsing failed", "host", host, "interface", iface, "error", err.Error())
 			l.Logger.Error(err, fixedErrorMsg+"rx_err for %s: %v", iface, err)
 			continue
 		}
 
 		rxDrpFloat, err := parseFloat(rxDrpValue)
 		if err != nil {
-			l.Logger.V(2).Info("branch: rx_drp parsing failed", "host", host, "interface", iface, "error", err.Error())
+			l.Logger.V(3).Info("branch: rx_drp parsing failed", "host", host, "interface", iface, "error", err.Error())
 			l.Logger.Error(err, fixedErrorMsg+"rx_drp for %s: %v", iface, err)
 			continue
 		}
 
 		rxOvrFloat, err := parseFloat(rxOvrValue)
 		if err != nil {
-			l.Logger.V(2).Info("branch: rx_ovr parsing failed", "host", host, "interface", iface, "error", err.Error())
+			l.Logger.V(3).Info("branch: rx_ovr parsing failed", "host", host, "interface", iface, "error", err.Error())
 			l.Logger.Error(err, fixedErrorMsg+"rx_ovr for %s: %v", iface, err)
 			continue
 		}
 
 		txOKFloat, err := parseFloat(txOKValue)
 		if err != nil {
-			l.Logger.V(2).Info("branch: tx_ok parsing failed", "host", host, "interface", iface, "error", err.Error())
+			l.Logger.V(3).Info("branch: tx_ok parsing failed", "host", host, "interface", iface, "error", err.Error())
 			l.Logger.Error(err, fixedErrorMsg+"tx_ok for %s: %v", iface, err)
 			continue
 		}
 
 		txBPSFloat, err := parseFloat(txBPSValue)
 		if err != nil {
-			l.Logger.V(2).Info("branch: tx_bps parsing failed", "host", host, "interface", iface, "error", err.Error())
+			l.Logger.V(3).Info("branch: tx_bps parsing failed", "host", host, "interface", iface, "error", err.Error())
 			l.Logger.Error(err, fixedErrorMsg+"tx_bps for %s: %v", iface, err)
 			continue
 		}
 
 		txUtilFloat, err := parsePercentage(txUtilValue)
 		if err != nil {
-			l.Logger.V(2).Info("branch: tx_util parsing failed", "host", host, "interface", iface, "error", err.Error())
+			l.Logger.V(3).Info("branch: tx_util parsing failed", "host", host, "interface", iface, "error", err.Error())
 			l.Logger.Error(err, fixedErrorMsg+"tx_util for %s: %v", iface, err)
 			continue
 		}
 
 		txErrFloat, err := parseFloat(txErrValue)
 		if err != nil {
-			l.Logger.V(2).Info("branch: tx_err parsing failed", "host", host, "interface", iface, "error", err.Error())
+			l.Logger.V(3).Info("branch: tx_err parsing failed", "host", host, "interface", iface, "error", err.Error())
 			l.Logger.Error(err, fixedErrorMsg+"tx_err for %s: %v", iface, err)
 			continue
 		}
 
 		txDrpFloat, err := parseFloat(txDrpValue)
 		if err != nil {
-			l.Logger.V(2).Info("branch: tx_drp parsing failed", "host", host, "interface", iface, "error", err.Error())
+			l.Logger.V(3).Info("branch: tx_drp parsing failed", "host", host, "interface", iface, "error", err.Error())
 			l.Logger.Error(err, fixedErrorMsg+"tx_drp for %s: %v", iface, err)
 			continue
 		}
 
 		txOvrFloat, err := parseFloat(txOvrValue)
 		if err != nil {
-			l.Logger.V(2).Info("branch: tx_ovr parsing failed", "host", host, "interface", iface, "error", err.Error())
+			l.Logger.V(3).Info("branch: tx_ovr parsing failed", "host", host, "interface", iface, "error", err.Error())
 			l.Logger.Error(err, fixedErrorMsg+"tx_ovr for %s: %v", iface, err)
 			continue
 		}
 
-		l.Logger.V(2).Info("branch: writing metrics to Prometheus", "host", host, "interface", iface)
+		l.Logger.V(3).Info("branch: writing metrics to Prometheus", "host", host, "interface", iface)
 		// Set Prometheus metrics
 		err = l.Metrics.Write(rxOkGauge, prometheus.Labels{"host": host, "interface": iface}, rxOKFloat, writedMetrics)
 		if err != nil {
-			l.Logger.V(2).Info("branch: rxOkGauge write failed", "host", host, "interface", iface, "error", err.Error())
+			l.Logger.V(3).Info("branch: rxOkGauge write failed", "host", host, "interface", iface, "error", err.Error())
 		}
 		err = l.Metrics.Write(rxBpsGauge, prometheus.Labels{"host": host, "interface": iface}, rxBPSFloat, writedMetrics)
 		if err != nil {
-			l.Logger.V(2).Info("branch: rxBpsGauge write failed", "host", host, "interface", iface, "error", err.Error())
+			l.Logger.V(3).Info("branch: rxBpsGauge write failed", "host", host, "interface", iface, "error", err.Error())
 		}
 		err = l.Metrics.Write(rxUtilGauge, prometheus.Labels{"host": host, "interface": iface}, rxUtilFloat, writedMetrics)
 		if err != nil {
-			l.Logger.V(2).Info("branch: rxUtilGauge write failed", "host", host, "interface", iface, "error", err.Error())
+			l.Logger.V(3).Info("branch: rxUtilGauge write failed", "host", host, "interface", iface, "error", err.Error())
 		}
 		err = l.Metrics.Write(txOkGauge, prometheus.Labels{"host": host, "interface": iface}, txOKFloat, writedMetrics)
 		if err != nil {
-			l.Logger.V(2).Info("branch: txOkGauge write failed", "host", host, "interface", iface, "error", err.Error())
+			l.Logger.V(3).Info("branch: txOkGauge write failed", "host", host, "interface", iface, "error", err.Error())
 		}
 		err = l.Metrics.Write(txBpsGauge, prometheus.Labels{"host": host, "interface": iface}, txBPSFloat, writedMetrics)
 		if err != nil {
-			l.Logger.V(2).Info("branch: txBpsGauge write failed", "host", host, "interface", iface, "error", err.Error())
+			l.Logger.V(3).Info("branch: txBpsGauge write failed", "host", host, "interface", iface, "error", err.Error())
 		}
 		err = l.Metrics.Write(txUtilGauge, prometheus.Labels{"host": host, "interface": iface}, txUtilFloat, writedMetrics)
 		if err != nil {
-			l.Logger.V(2).Info("branch: txUtilGauge write failed", "host", host, "interface", iface, "error", err.Error())
+			l.Logger.V(3).Info("branch: txUtilGauge write failed", "host", host, "interface", iface, "error", err.Error())
 		}
 		err = l.Metrics.Write(rxErrGauge, prometheus.Labels{"host": host, "interface": iface}, rxErrFloat, writedMetrics)
 		if err != nil {
-			l.Logger.V(2).Info("branch: rxErrGauge write failed", "host", host, "interface", iface, "error", err.Error())
+			l.Logger.V(3).Info("branch: rxErrGauge write failed", "host", host, "interface", iface, "error", err.Error())
 		}
 		err = l.Metrics.Write(rxDrpGauge, prometheus.Labels{"host": host, "interface": iface}, rxDrpFloat, writedMetrics)
 		if err != nil {
-			l.Logger.V(2).Info("branch: rxDrpGauge write failed", "host", host, "interface", iface, "error", err.Error())
+			l.Logger.V(3).Info("branch: rxDrpGauge write failed", "host", host, "interface", iface, "error", err.Error())
 		}
 		err = l.Metrics.Write(rxOvrGauge, prometheus.Labels{"host": host, "interface": iface}, rxOvrFloat, writedMetrics)
 		if err != nil {
-			l.Logger.V(2).Info("branch: rxOvrGauge write failed", "host", host, "interface", iface, "error", err.Error())
+			l.Logger.V(3).Info("branch: rxOvrGauge write failed", "host", host, "interface", iface, "error", err.Error())
 		}
 		err = l.Metrics.Write(txErrGauge, prometheus.Labels{"host": host, "interface": iface}, txErrFloat, writedMetrics)
 		if err != nil {
-			l.Logger.V(2).Info("branch: txErrGauge write failed", "host", host, "interface", iface, "error", err.Error())
+			l.Logger.V(3).Info("branch: txErrGauge write failed", "host", host, "interface", iface, "error", err.Error())
 		}
 		err = l.Metrics.Write(txDrpGauge, prometheus.Labels{"host": host, "interface": iface}, txDrpFloat, writedMetrics)
 		if err != nil {
-			l.Logger.V(2).Info("branch: txDrpGauge write failed", "host", host, "interface", iface, "error", err.Error())
+			l.Logger.V(3).Info("branch: txDrpGauge write failed", "host", host, "interface", iface, "error", err.Error())
 		}
 		err = l.Metrics.Write(txOvrGauge, prometheus.Labels{"host": host, "interface": iface}, txOvrFloat, writedMetrics)
 		if err != nil {
-			l.Logger.V(2).Info("branch: txOvrGauge write failed", "host", host, "interface", iface, "error", err.Error())
+			l.Logger.V(3).Info("branch: txOvrGauge write failed", "host", host, "interface", iface, "error", err.Error())
 		}
 
-		l.Logger.V(2).Info("branch: metrics written successfully", "host", host, "interface", iface)
+		l.Logger.V(3).Info("branch: metrics written successfully", "host", host, "interface", iface)
 	}
 
 	l.Logger.Info("metrics parsing and writing completed", "host", host)

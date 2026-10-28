@@ -6,6 +6,12 @@
     - name: delete vlan member
       ansible.builtin.shell: |
         config vlan member del {{ vid }} {{ interface }}
+      register: delete_vlan_member_result
+
+    - name: save config
+      ansible.builtin.shell: |
+        config save -y
+      when: delete_vlan_member_result is changed
 
     - name: show vlan
       ansible.builtin.shell: |

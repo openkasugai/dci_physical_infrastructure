@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package canonical_maas
 
 import (
@@ -40,6 +26,42 @@ type mockExecutor struct {
 type mockExecutorCall struct {
 	name string
 	args []string
+}
+
+type sequenceMockExecutor struct {
+	outputs   [][]byte
+	errs      []error
+	callCount int
+	mutex     sync.Mutex
+}
+
+func (m *sequenceMockExecutor) ExecuteCommand(ctx context.Context, name string, arg ...string) ([]byte, error) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	idx := m.callCount
+	m.callCount++
+
+	if idx >= len(m.outputs) {
+		if len(m.outputs) == 0 {
+			return nil, nil
+		}
+		idx = len(m.outputs) - 1
+	}
+	if idx >= len(m.errs) {
+		if len(m.errs) == 0 {
+			return m.outputs[idx], nil
+		}
+		return m.outputs[idx], m.errs[len(m.errs)-1]
+	}
+
+	return m.outputs[idx], m.errs[idx]
+}
+
+func (m *sequenceMockExecutor) Calls() int {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	return m.callCount
 }
 
 func (m *mockExecutor) ExecuteCommand(ctx context.Context, name string, arg ...string) ([]byte, error) {
@@ -74,15 +96,22 @@ func (m *mockExecutor) Reset() {
 func setupTestEnvironment(t *testing.T) {
 	// Set test environment variables
 	testEnv := map[string]string{
-		"LOG_LEVEL":        "2",
-		"MAAS_SERVER_PORT": "8080",
-		"MAAS_ACCESS_URL":  "http://test-maas.com",
-		"MAAS_API_KEY":     "test-key",
-		"VM_HOST_DISK":     "50",
-		"LXD_PORT":         "8443",
-		"SSH_KEY":          "/test/ssh/key",
-		"TLS_ENABLE":       "false",
-		"TLS_CERT_PATH":    "/certs",
+		"LOG_LEVEL":                       "2",
+		"MAAS_SERVER_PORT":                "8080",
+		"MAAS_ACCESS_URL":                 "http://test-maas.com",
+		"MAAS_API_KEY":                    "test-key",
+		"VM_HOST_DISK":                    "50",
+		"LXD_PORT":                        "8443",
+		"SSH_KEY":                         "/test/ssh/key",
+		"TLS_ENABLE":                      "false",
+		"TLS_CERT_PATH":                   "/certs",
+		"K8S_JOB_WORKER_IMAGE":            "test-worker:latest",
+		"K8S_JOB_SERVICE_ACCOUNT":         "test-service-account",
+		"K8S_JOB_BACKOFF_LIMIT":           "1",
+		"K8S_JOB_TTL_SECONDS":             "600",
+		"K8S_JOB_ACTIVE_DEADLINE_SECONDS": "7200",
+		"MAAS_API_RETRY_COUNT":            "10",
+		"MAAS_API_RETRY_INTERVAL_SECONDS": "5",
 	}
 
 	for key, value := range testEnv {
@@ -752,5 +781,58 @@ func TestCanonicalMaasAnsibleImple_LoginUser_UsesCorrectUser(t *testing.T) {
 		if !foundUser {
 			t.Error("Expected to find user 'cloud-user'")
 		}
+	}
+}
+
+func TestCanonicalMaasAnsibleImple_CmdExecute_RetryCount_SucceedsAfterRetries(t *testing.T) {
+	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
+	defer cleanup()
+
+	setupTestEnvironment(t)
+
+	seqExec := &sequenceMockExecutor{
+		outputs: [][]byte{[]byte("first fail"), []byte("second fail"), []byte("ok")},
+		errs:    []error{errors.New("fail-1"), errors.New("fail-2"), nil},
+	}
+
+	ansible := &CanonicalMaasAnsibleImple{
+		Logger:   klog.NewKlogr(),
+		Executor: seqExec,
+	}
+
+	output, err := ansible.CmdExecute(context.Background(), "host", "playbook.yml", "", 3)
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+	if string(output) != "ok" {
+		t.Fatalf("Expected output 'ok', got %q", string(output))
+	}
+	if seqExec.Calls() != 3 {
+		t.Fatalf("Expected 3 attempts, got %d", seqExec.Calls())
+	}
+}
+
+func TestCanonicalMaasAnsibleImple_CmdExecute_RetryCount_FailsAfterLimit(t *testing.T) {
+	cleanup := test_utils.SetupTestEnvironmentWithKlog(t)
+	defer cleanup()
+
+	setupTestEnvironment(t)
+
+	seqExec := &sequenceMockExecutor{
+		outputs: [][]byte{[]byte("fail-1"), []byte("fail-2"), []byte("fail-3")},
+		errs:    []error{errors.New("fail-1"), errors.New("fail-2"), errors.New("fail-3")},
+	}
+
+	ansible := &CanonicalMaasAnsibleImple{
+		Logger:   klog.NewKlogr(),
+		Executor: seqExec,
+	}
+
+	_, err := ansible.CmdExecute(context.Background(), "host", "playbook.yml", "", 3)
+	if err == nil {
+		t.Fatal("Expected error, got nil")
+	}
+	if seqExec.Calls() != 3 {
+		t.Fatalf("Expected 3 attempts, got %d", seqExec.Calls())
 	}
 }

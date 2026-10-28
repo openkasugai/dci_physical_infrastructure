@@ -1,24 +1,10 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package implementation
 
 import (
+	"common/models"
 	"context"
 	"errors"
 	"fmt"
-	"common/models"
 	"log_module/internal/server/interfaces" // import for interface
 	"os"
 	"strconv"
@@ -89,103 +75,103 @@ func (l *IPMIImplement) Finalize() {
 }
 
 func (l *IPMIImplement) Collection(targetList []interfaces.IPMITargetList) {
-	l.Logger.V(2).Info("start Colloction", "targetListCount", len(targetList))
+	l.Logger.V(3).Info("start Colloction", "targetListCount", len(targetList))
 	defer func() {
-		l.Logger.V(2).Info("end Colloction")
+		l.Logger.V(3).Info("end Colloction")
 	}()
 
-	l.Logger.Info("starting IPMI data collection", "targetCount", len(targetList))
+	l.Logger.V(3).Info("starting IPMI data collection", "targetCount", len(targetList))
 
 	for i, target := range targetList {
-		l.Logger.V(2).Info("processing IPMI target", "index", i, "serverID", target.ServerID, "ProductInfo", target.ProductInfo)
+		l.Logger.V(3).Info("processing IPMI target", "index", i, "serverID", target.ServerID, "ProductInfo", target.ProductInfo)
 
 		// determine product type
 		product := models.ParseProductTypeFromJSON[models.ServerProductType](target.ProductInfo)
-		
+
 		var api string
-		if (product == models.Dell) {					// DELL
-			api = "https://redfish/v1/Systems/System.Embedded.1"
-			l.Logger.V(2).Info("branch: DELL server API selected", "api", api)
-		} else if (product == models.Primergy) {		// PRIMERGY
-			api = "https://redfish/v1/Systems/0"
-			l.Logger.V(2).Info("branch: PRIMERGY server API selected", "api", api)
-		} else if (product == models.Supermicro) {		// Supermicro
-			api = "https://redfish/v1/Systems/1"
-			l.Logger.V(2).Info("branch: ", "target is Supermicro server", "api", api)
+		if product == models.Dell { // DELL
+			api = "redfish/v1/Systems/System.Embedded.1"
+			l.Logger.V(3).Info("branch: DELL server API selected", "api", api)
+		} else if product == models.Primergy { // PRIMERGY
+			api = "redfish/v1/Systems/0"
+			l.Logger.V(3).Info("branch: PRIMERGY server API selected", "api", api)
+		} else if product == models.Supermicro { // Supermicro
+			api = "redfish/v1/Systems/1"
+			l.Logger.V(3).Info("branch: ", "target is Supermicro server", "api", api)
 		} else {
-			l.Logger.V(2).Info("branch: ", "target is unsupport product", "ProductInfo", target.ProductInfo)
+			l.Logger.V(3).Info("branch: ", "target is unsupport product", "ProductInfo", target.ProductInfo)
 			continue
 		}
 
 		// API execute
 		resp, err := l.API.APIExecuteUserAuth(context.Background(), "GET",
-			target.IPMIAddress, api,
+			fmt.Sprintf("https://%s", target.IPMIAddress), api,
 			target.IPMIUser, target.IPMIPassword, "")
 		if err != nil {
-			l.Logger.V(2).Info("branch: API execution failed", "serverID", target.ServerID, "error", err.Error())
+			l.Logger.V(3).Info("branch: API execution failed", "serverID", target.ServerID, "error", err.Error())
 			l.Logger.Error(err, err.Error())
 			continue
 		}
 
-		l.Logger.V(2).Info("branch: API execution successful", "serverID", target.ServerID)
+		l.Logger.V(3).Info("branch: API execution successful", "serverID", target.ServerID)
 
 		// ProcessorSummary
 		processer, err := getJsonObjectValue(resp, "ProcessorSummary")
 		if err != nil {
-			l.Logger.V(2).Info("branch: ProcessorSummary extraction failed", "serverID", target.ServerID, "error", err.Error())
+			l.Logger.V(3).Info("branch: ProcessorSummary extraction failed", "serverID", target.ServerID, "error", err.Error())
 			l.Logger.Error(err, err.Error())
 			continue
 		}
 		processer, err = getJsonObjectValue(processer, "Status")
 		if err != nil {
-			l.Logger.V(2).Info("branch: ProcessorSummary Status extraction failed", "serverID", target.ServerID, "error", err.Error())
+			l.Logger.V(3).Info("branch: ProcessorSummary Status extraction failed", "serverID", target.ServerID, "error", err.Error())
 			l.Logger.Error(err, err.Error())
 			continue
 		}
 		processerHelth, err := getJsonStringValue(processer, "Health")
 		if err != nil {
-			l.Logger.V(2).Info("branch: ProcessorSummary Health extraction failed", "serverID", target.ServerID, "error", err.Error())
+			l.Logger.V(3).Info("branch: ProcessorSummary Health extraction failed", "serverID", target.ServerID, "error", err.Error())
 			l.Logger.Error(err, err.Error())
 			continue
 		}
 
-		l.Logger.V(2).Info("branch: processor health extracted", "serverID", target.ServerID, "health", processerHelth)
+		l.Logger.V(3).Info("branch: processor health extracted", "serverID", target.ServerID, "health", processerHelth)
 
 		// MemorrySummary
 		memory, err := getJsonObjectValue(resp, "MemorySummary")
 		if err != nil {
-			l.Logger.V(2).Info("branch: MemorySummary extraction failed", "serverID", target.ServerID, "error", err.Error())
+			l.Logger.V(3).Info("branch: MemorySummary extraction failed", "serverID", target.ServerID, "error", err.Error())
 			l.Logger.Error(err, err.Error())
 			continue
 		}
 		memory, err = getJsonObjectValue(memory, "Status")
 		if err != nil {
-			l.Logger.V(2).Info("branch: MemorySummary Status extraction failed", "serverID", target.ServerID, "error", err.Error())
+			l.Logger.V(3).Info("branch: MemorySummary Status extraction failed", "serverID", target.ServerID, "error", err.Error())
 			l.Logger.Error(err, err.Error())
 			continue
 		}
 		memoryHelth, err := getJsonStringValue(memory, "Health")
 		if err != nil {
-			l.Logger.V(2).Info("branch: MemorySummary Health extraction failed", "serverID", target.ServerID, "error", err.Error())
+			l.Logger.V(3).Info("branch: MemorySummary Health extraction failed", "serverID", target.ServerID, "error", err.Error())
 			l.Logger.Error(err, err.Error())
 			continue
 		}
 
-		l.Logger.V(2).Info("branch: memory health extracted", "serverID", target.ServerID, "health", memoryHelth)
+		l.Logger.V(3).Info("branch: memory health extracted", "serverID", target.ServerID, "health", memoryHelth)
 
 		// write logging
 		logData := fmt.Sprintf(`{ "processer": "%s", "memory": "%s" }`, processerHelth, memoryHelth)
 		err = l.Logging.Write(target.ServerID, logData)
 		if err != nil {
-			l.Logger.V(2).Info("branch: logging write failed", "serverID", target.ServerID, "error", err.Error())
+			l.Logger.V(3).Info("branch: logging write failed", "serverID", target.ServerID, "error", err.Error())
 			l.Logger.Error(err, err.Error())
 			continue
 		}
 
-		l.Logger.V(2).Info("branch: log written successfully", "serverID", target.ServerID)
+		l.Logger.V(3).Info("branch: log written successfully", "serverID", target.ServerID)
 	}
 
-	l.Logger.Info("IPMI data collection completed", "targetCount", len(targetList))
+	l.Logger.V(3).Info("IPMI data collection completed", "targetCount", len(targetList))
 }
 
 func getValue(inputJson interface{}, key string) (value interface{}, err error) {

@@ -1,17 +1,3 @@
-// Copyright 2026 NTT, Inc.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package pg_cdi
 
 import (
@@ -37,6 +23,11 @@ import (
 var resultSuccess = common.ResultCode_SUCCESS
 var resultAccept = common.ResultCode_ACCEPT
 var resultError = common.ResultCode_ERROR
+
+const (
+	machineStatusPollInterval = 3 * time.Second
+	machineStatusPollTimeout  = 3 * time.Minute
+)
 
 // Global variables for model mappings
 var (
@@ -192,7 +183,7 @@ func (l PgCDIController) MachineDestroy(ctx context.Context, in *proto.MachineDe
 	}
 	// Wait until the machine is powered off
 	status := l.pollMachineStatus(ctx, in.GetProductInfo(), in.GetCdiInfo(), in.GetMachineName(), in.GetGroupName(), in.GetExtraParameter(), 
-									[]string{"ERROR", "INACTIVE POFF"}, 1*time.Second, 2*time.Minute)
+									[]string{"ERROR", "INACTIVE POFF"}, machineStatusPollInterval, machineStatusPollTimeout)
 
 	l.Logger.V(2).Info("branch: power off done",
 		"remote_host", remoteHost,
@@ -229,7 +220,7 @@ func (l PgCDIController) MachineDestroy(ctx context.Context, in *proto.MachineDe
 
 		// Wait until the machine is powered off
 		status := l.pollMachineStatus(ctx, in.GetProductInfo(), in.GetCdiInfo(), in.GetMachineName(), in.GetGroupName(), in.GetExtraParameter(),
-										[]string{"INACTIVE POFF"}, 1*time.Second, 2*time.Minute)
+										[]string{"INACTIVE POFF"}, machineStatusPollInterval, machineStatusPollTimeout)
 
 		l.Logger.V(2).Info("branch: force power off done",
 			"remote_host", remoteHost,
@@ -639,7 +630,7 @@ func (l PgCDIController) CardScaling(ctx context.Context, in *proto.CardScalingR
 
             // machine modify is fire-and-forget; poll until machine reaches stable state
             status := l.pollMachineStatus(asyncCtx, in.GetProductInfo(), in.GetCdiInfo(), in.GetMachineName(), in.GetGroupName(), in.GetExtraParameter(),
-                []string{"INACTIVE POFF", "ERROR"}, 1*time.Second, 2*time.Minute)
+				[]string{"INACTIVE POFF", "ERROR"}, machineStatusPollInterval, machineStatusPollTimeout)
             l.Logger.V(2).Info("branch: polling after add operation done",
                 "remote_host", remoteHost,
                 "machine_name", machineName,
@@ -682,7 +673,7 @@ func (l PgCDIController) CardScaling(ctx context.Context, in *proto.CardScalingR
 
             // machine modify is fire-and-forget; poll until machine reaches stable state
             status := l.pollMachineStatus(asyncCtx, in.GetProductInfo(), in.GetCdiInfo(), in.GetMachineName(), in.GetGroupName(), in.GetExtraParameter(),
-                []string{"INACTIVE POFF", "ERROR"}, 1*time.Second, 2*time.Minute)
+				[]string{"INACTIVE POFF", "ERROR"}, machineStatusPollInterval, machineStatusPollTimeout)
             l.Logger.V(2).Info("branch: polling after remove operation done",
                 "remote_host", remoteHost,
                 "machine_name", machineName,
